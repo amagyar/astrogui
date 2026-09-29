@@ -286,6 +286,21 @@ func ChooseCollection(cols []Collection, in io.Reader, out io.Writer) (Collectio
 	return cols[n-1], nil
 }
 
+// ResolveCollection uses a valid configured collection preference, or falls
+// back to an explicit choice when the preference is missing or stale. The
+// boolean reports whether the preference was honored.
+func ResolveCollection(cols []Collection, preferred string, in io.Reader, out io.Writer) (Collection, bool, error) {
+	if preferred != "" {
+		for _, c := range cols {
+			if c.Name == preferred {
+				return c, true, nil
+			}
+		}
+	}
+	c, err := ChooseCollection(cols, in, out)
+	return c, false, err
+}
+
 // Managed returns the collection to manage for a project: a user-configured
 // content directory takes precedence over the detected one; otherwise the
 // detected (and possibly prompted-for) collection is used as-is.

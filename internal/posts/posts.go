@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/astrogui/astrogui/internal/safe"
 	"github.com/goccy/go-yaml"
 )
 
@@ -424,6 +425,12 @@ func (e *ConflictError) Error() string {
 //
 // The write is atomic (temp file plus rename in the same directory).
 func SaveBody(path string, body []byte, expectedModTime time.Time) error {
+	return SaveBodyGuarded(nil, path, body, expectedModTime)
+}
+
+// SaveBodyGuarded is SaveBody with replacement performed through guard's
+// anchored managed-directory handle.
+func SaveBodyGuarded(guard *safe.Guard, path string, body []byte, expectedModTime time.Time) error {
 	current, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("posts: reading %s: %w", path, err)
@@ -446,12 +453,18 @@ func SaveBody(path string, body []byte, expectedModTime time.Time) error {
 
 	out := append([]byte(nil), p.raw[:p.bodyStart]...)
 	out = append(out, body...)
-	return writeFileAtomic(path, out)
+	return writeFileAtomic(guard, path, out)
 }
 
 // WriteFile is the guarded entry the server uses for raw whole-file saves
 // (the raw frontmatter view). Same conflict semantics as SaveBody.
 func WriteFile(path string, content, expected []byte, expectedModTime time.Time) error {
+	return WriteFileGuarded(nil, path, content, expected, expectedModTime)
+}
+
+// WriteFileGuarded is WriteFile with replacement performed through guard's
+// anchored managed-directory handle.
+func WriteFileGuarded(guard *safe.Guard, path string, content, expected []byte, expectedModTime time.Time) error {
 	current, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("posts: reading %s: %w", path, err)
@@ -466,7 +479,7 @@ func WriteFile(path string, content, expected []byte, expectedModTime time.Time)
 	if bytesEqual(current, content) {
 		return nil
 	}
-	return writeFileAtomic(path, content)
+	return writeFileAtomic(guard, path, content)
 }
 
 func bytesEqual(a, b []byte) bool {
@@ -483,7 +496,13 @@ func bytesEqual(a, b []byte) bool {
 
 // writeFileAtomic replaces path's content via a temp file in the same
 // directory followed by a rename, so a crash never leaves a partial post.
-func writeFileAtomic(path string, content []byte) error {
+func writeFileAtomic(guard *safe.Guard, path string, content []byte) error {
+	if guard != nil {
+		if err := guard.AtomicWriteFile(path, content, 0o644); err != nil {
+			return fmt.Errorf("posts: atomically writing %s: %w", path, err)
+		}
+		return nil
+	}
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".astrogui-save-*")
 	if err != nil {

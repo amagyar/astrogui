@@ -26,6 +26,73 @@ type Result struct {
 	Output  string
 }
 
+// FileChange is one path and its two-column porcelain status.
+type FileChange struct {
+	Status string `json:"status"`
+	Path   string `json:"path"`
+}
+
+// WorkingTree is a snapshot of paths that git add -A would stage.
+type WorkingTree struct {
+	Changes []FileChange `json:"changes"`
+	Clean   bool         `json:"clean"`
+}
+
+// Status reads a NUL-delimited porcelain status snapshot without staging or
+// otherwise changing the repository.
+func Status(repoDir string) (*WorkingTree, error) {
+	if err := available(repoDir); err != nil {
+		return nil, err
+	}
+	cmd := exec.Command("git", "status", "--porcelain=v1", "-z", "--untracked-files=all")
+	cmd.Dir = repoDir
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("vcs: git status failed: %s", strings.TrimSpace(out.String()))
+	}
+	changes, err := parsePorcelainZ(out.Bytes())
+	if err != nil {
+		return nil, fmt.Errorf("vcs: parsing git status: %w", err)
+	}
+	return &WorkingTree{Changes: changes, Clean: len(changes) == 0}, nil
+}
+
+func parsePorcelainZ(data []byte) ([]FileChange, error) {
+	changes := make([]FileChange, 0)
+	for offset := 0; offset < len(data); {
+		end := bytes.IndexByte(data[offset:], 0)
+		if end < 0 {
+			end = len(data) - offset
+		}
+		record := data[offset : offset+end]
+		offset += end + 1
+		if len(record) == 0 {
+			continue
+		}
+		if len(record) < 4 || record[2] != ' ' {
+			return nil, fmt.Errorf("invalid porcelain record %q", record)
+		}
+		status := string(record[:2])
+		path := string(record[3:])
+		if strings.ContainsAny(status, "RC") {
+			if offset >= len(data) {
+				return nil, fmt.Errorf("rename/copy record has no source path")
+			}
+			nextEnd := bytes.IndexByte(data[offset:], 0)
+			if nextEnd < 0 {
+				nextEnd = len(data) - offset
+			}
+			source := string(data[offset : offset+nextEnd])
+			offset += nextEnd + 1
+			path = source + " -> " + path
+		}
+		changes = append(changes, FileChange{Status: status, Path: path})
+	}
+	return changes, nil
+}
+
 // Commit stages the working tree and creates one commit with the message.
 // Several posts published beforehand are included in the single commit
 // because staging is the whole tree.
@@ -36,8 +103,8 @@ func Commit(repoDir, message string) (*Result, error) {
 	if strings.TrimSpace(message) == "" {
 		return nil, fmt.Errorf("vcs: commit message is empty; the user confirms the message before the commit is created")
 	}
-	if _, err := run(repoDir, "add", "-A"); err != nil {
-		return nil, fmt.Errorf("vcs: staging the working tree: %w", err)
+	if r, err := run(repoDir, "add", "-A"); err != nil {
+		return r, fmt.Errorf("vcs: staging the working tree: %w", err)
 	}
 	// Nothing staged: report plainly instead of failing the commit.
 	if _, err := run(repoDir, "diff", "--cached", "--quiet"); err == nil {
@@ -50,8 +117,9 @@ func Commit(repoDir, message string) (*Result, error) {
 // remote. A push failure is returned with its output and is never reported
 // as success.
 func CommitAndPush(repoDir, message string) (*Result, error) {
-	if _, err := Commit(repoDir, message); err != nil {
-		return nil, err
+	committed, err := Commit(repoDir, message)
+	if err != nil {
+		return committed, err
 	}
 	r, err := run(repoDir, "push")
 	if err != nil {

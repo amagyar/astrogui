@@ -3,11 +3,13 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,6 +52,7 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatalf("guard: %v", err)
 	}
+	t.Cleanup(func() { _ = guard.Close() })
 	derived, err := cache.Open()
 	if err != nil {
 		t.Fatalf("cache: %v", err)
@@ -408,6 +411,9 @@ func TestBoardAndEditorFlow(t *testing.T) {
 	if res.StatusCode != 409 {
 		t.Fatalf("conflicting save: %d %v, want 409", res.StatusCode, out)
 	}
+	if out["currentModTime"] == nil || out["current"] == nil {
+		t.Fatalf("conflict did not include the reviewed disk version and modTime: %v", out)
+	}
 	onDiskAfter, _ := os.ReadFile(file)
 	if !bytes.Equal(onDiskBefore, onDiskAfter) {
 		t.Error("conflict overwrote the on-disk version")
@@ -563,6 +569,13 @@ func TestUploadAsset(t *testing.T) {
 	if err != nil || len(data) == 0 {
 		t.Errorf("asset not written into the post's directory: %v", err)
 	}
+	res, out = f.do("POST", "/api/collections/blog/entries/"+name+"/assets", map[string]any{
+		"name": "diagram.png",
+		"data": "aVNVTS1EQVRB",
+	})
+	if res.StatusCode != 201 || out["name"] != "diagram-2.png" {
+		t.Errorf("duplicate upload = %d %v, want unique diagram-2.png", res.StatusCode, out)
+	}
 
 	// A nameless paste gets a useful name instead of failing (8.9).
 	res, out = f.do("POST", "/api/collections/blog/entries/"+name+"/assets", map[string]any{
@@ -574,6 +587,27 @@ func TestUploadAsset(t *testing.T) {
 	}
 	if !strings.HasPrefix(out["name"].(string), "pasted-") {
 		t.Errorf("nameless upload named %v", out["name"])
+	}
+
+	// A dangling symlink must not be treated as an unused name and followed
+	// outside the managed post directory.
+	outside := filepath.Join(f.base, "outside", "diagram.png")
+	if err := os.MkdirAll(filepath.Dir(outside), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	postDir := filepath.Join(f.base, "drafts", "ideas", name)
+	if err := os.Symlink(outside, filepath.Join(postDir, "escape.png")); err != nil {
+		t.Fatal(err)
+	}
+	res, _ = f.do("POST", "/api/collections/blog/entries/"+name+"/assets", map[string]any{
+		"name": "escape.png",
+		"data": "aVNVTS1EQVRB",
+	})
+	if res.StatusCode != http.StatusForbidden {
+		t.Errorf("upload through dangling symlink status = %d, want 403", res.StatusCode)
+	}
+	if _, err := os.Stat(outside); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("upload created outside target: %v", err)
 	}
 }
 
@@ -594,6 +628,59 @@ func TestFunnelEndpoint(t *testing.T) {
 	advanced := funnel["advanced"].(map[string]any)
 	if advanced["wip"].(float64) != 1 {
 		t.Errorf("advanced into wip = %v", advanced["wip"])
+	}
+}
+
+func TestGitStatusPreviewEndpoint(t *testing.T) {
+	f := newFixture(t)
+	if out, err := exec.Command("git", "init", f.base).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	name := "new file\nname.md"
+	if err := os.WriteFile(filepath.Join(f.base, name), []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, body := f.do("GET", "/api/collections/blog/git-status", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("git status: %d %v", res.StatusCode, body)
+	}
+	if body["clean"] != false {
+		t.Fatalf("working tree unexpectedly clean: %v", body)
+	}
+	changes, ok := body["changes"].([]any)
+	if !ok || len(changes) != 1 {
+		t.Fatalf("changes = %v", body["changes"])
+	}
+	change := changes[0].(map[string]any)
+	if change["status"] != "??" || change["path"] != name {
+		t.Fatalf("path/status not preserved through API: %+v", change)
+	}
+}
+
+func TestCommitFailureOutputSurvivesAPIResponse(t *testing.T) {
+	f := newFixture(t)
+	if out, err := exec.Command("git", "init", f.base).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", f.base, "config", "user.name", "test").CombinedOutput(); err != nil {
+		t.Fatalf("git config: %v\n%s", err, out)
+	}
+	if out, err := exec.Command("git", "-C", f.base, "config", "user.email", "test@example.test").CombinedOutput(); err != nil {
+		t.Fatalf("git config: %v\n%s", err, out)
+	}
+	if err := os.WriteFile(filepath.Join(f.base, "newfile.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hook := filepath.Join(f.base, ".git", "hooks", "pre-commit")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho commit-hook-output >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	res, body := f.do("POST", "/api/collections/blog/commit", map[string]any{"message": "will fail"})
+	if res.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("commit response = %d %v, want 500", res.StatusCode, body)
+	}
+	if body["command"] != "git commit -m will fail" || !strings.Contains(fmt.Sprint(body["output"]), "commit-hook-output") {
+		t.Fatalf("commit failure output lost: %v", body)
 	}
 }
 

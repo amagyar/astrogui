@@ -27,7 +27,7 @@ The tool SHALL identify the Astro project it is managing, and SHALL do so withou
 
 ### Requirement: Content collection resolution
 
-The tool SHALL determine which directory holds the blog's published content, and SHALL allow the user to correct that determination.
+The tool SHALL determine which directory holds the blog's published content, SHALL allow the user to correct that determination, and SHALL persist and honor a valid collection selection for subsequent runs. It SHALL NOT guess when multiple collections exist and no valid selection is configured.
 
 #### Scenario: Standard project layout
 
@@ -41,8 +41,19 @@ The tool SHALL determine which directory holds the blog's published content, and
 
 #### Scenario: Several collections are present
 
-- **WHEN** the project defines more than one content collection
+- **WHEN** the project defines more than one content collection and no valid collection is configured
 - **THEN** the tool asks which collection to manage and does not guess
+- **AND** it persists the explicit selection for subsequent runs
+
+#### Scenario: A valid collection is already configured
+
+- **WHEN** the project defines more than one collection and a configured collection matches one of them
+- **THEN** the tool manages that collection without prompting
+
+#### Scenario: A configured collection is no longer present
+
+- **WHEN** the configured collection does not match any detected collection
+- **THEN** the tool asks the user to select a currently detected collection and persists the replacement choice
 
 ### Requirement: Write boundary
 

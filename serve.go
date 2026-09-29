@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -46,16 +47,18 @@ func serve(ctx context.Context, open bool) error {
 	if err != nil {
 		return err
 	}
-	chosen, err := project.ChooseCollection(cols, os.Stdin, os.Stderr)
+	chosen, configured, err := project.ResolveCollection(cols, cfg.Collection, os.Stdin, os.Stderr)
 	if err != nil {
 		return err // no collection is selected without an explicit answer
 	}
 	collection := project.Managed(proj.Root, cfg.ContentPath(proj.Root), chosen)
 
-	// Persist a non-default choice so subsequent runs skip the prompt.
-	if cfg.ContentDir != "" && cfg.Collection == "" {
-		cfg.Collection = collection.Name
+	// Remember an explicit or repaired preference without materializing the
+	// defaults returned by File.For into the user's config.
+	if err := rememberSelection(cfgFile, proj.Root, cfg.Collection, configured, collection.Name); err != nil {
+		fmt.Fprintf(os.Stderr, "astrogui: collection %q selected for this run but not saved: %v\n", collection.Name, err)
 	}
+	cfg.Collection = collection.Name
 
 	ideas := cfg.IdeasPath(proj.Root)
 	wip := cfg.WipPath(proj.Root)
@@ -65,6 +68,7 @@ func serve(ctx context.Context, open bool) error {
 	if err != nil {
 		return err
 	}
+	defer guard.Close()
 	derived, err := cache.Open()
 	if err != nil {
 		return err
@@ -123,6 +127,20 @@ func serve(ctx context.Context, open bool) error {
 	return nil
 }
 
+func rememberCollection(file config.File, root, name string) error {
+	stored := file.Projects[root]
+	stored.Collection = name
+	file.Set(root, stored)
+	return file.Save()
+}
+
+func rememberSelection(file config.File, root, previous string, configured bool, selected string) error {
+	if configured || previous == selected {
+		return nil
+	}
+	return rememberCollection(file, root, selected)
+}
+
 // openBrowser opens the announced URL in the user's browser.
 func openBrowser(url string) {
 	var cmd *exec.Cmd
@@ -134,10 +152,17 @@ func openBrowser(url string) {
 	default:
 		cmd = exec.Command("xdg-open", url)
 	}
+	startBrowserCommand(cmd, url, os.Stderr)
+}
+
+func startBrowserCommand(cmd *exec.Cmd, url string, stderr io.Writer) {
 	if err := cmd.Start(); err != nil {
-		fmt.Fprintln(os.Stderr, "astrogui: open the interface at", url)
+		fmt.Fprintln(stderr, "astrogui: open the interface at", url)
+		return
 	}
-	_ = cmd.Process.Release()
+	if cmd.Process != nil {
+		_ = cmd.Process.Release()
+	}
 }
 
 // replayFirstSeen walks the managed directories once at startup so derived

@@ -27,6 +27,7 @@ func newManager(t *testing.T) (*Manager, string) {
 	if err != nil {
 		t.Fatalf("guard: %v", err)
 	}
+	t.Cleanup(func() { _ = guard.Close() })
 	c, err := cache.Open()
 	if err != nil {
 		t.Fatalf("cache: %v", err)
@@ -201,6 +202,21 @@ func TestCreatePinsSlugToPostName(t *testing.T) {
 	}
 	if p2.Name == p.Name {
 		t.Errorf("duplicate name collision: %q", p2.Name)
+	}
+}
+
+func TestCreatePreservesYamlSignificantTitle(t *testing.T) {
+	m, _ := newManager(t)
+	title := "Plan #1: \"quoted\"\nsecond line"
+	p, err := m.Create(posts.StateIdeas, "yaml-title", map[string]any{"title": title}, []byte("Body.\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := p.FrontmatterMap()["title"]; got != title {
+		t.Fatalf("title round trip = %q, want %q", got, title)
+	}
+	if len(p.FrontmatterMap()) != 2 {
+		t.Fatalf("unexpected frontmatter fields were introduced: %#v", p.FrontmatterMap())
 	}
 }
 

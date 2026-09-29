@@ -51,10 +51,38 @@
 
   <dialog id="conflict">
     <h3>The post changed on disk while you edited it</h3>
-    <p id="conflict-detail"></p>
+    <p id="conflict-detail">Review both versions before choosing.</p>
+    <div id="conflict-versions">
+      <label>Your editor version<textarea id="conflict-mine" readonly></textarea></label>
+      <label>Current on-disk version<textarea id="conflict-disk" readonly></textarea></label>
+    </div>
     <div class="row">
-      <button id="conflict-reload" class="primary">Load the on-disk version</button>
-      <button id="conflict-keep" class="ghost">Keep editing mine</button>
+      <button id="conflict-back" class="ghost">Back to editor</button>
+      <button id="conflict-reload" class="ghost">Load disk version</button>
+      <button id="conflict-use-mine" class="primary">Replace disk with mine</button>
+    </div>
+  </dialog>
+
+  <dialog id="unsaved">
+    <h3>Unsaved changes</h3>
+    <p>Save your body or metadata changes before leaving?</p>
+    <div class="row">
+      <button id="unsaved-keep" class="ghost">Keep editing</button>
+      <button id="unsaved-discard" class="ghost">Discard changes</button>
+      <button id="unsaved-save" class="primary">Save changes</button>
+    </div>
+  </dialog>
+
+  <dialog id="commit-review">
+    <h3>Review working-tree changes</h3>
+    <p id="commit-action"></p>
+    <p id="commit-clean" hidden>No working-tree changes were reported in this snapshot.</p>
+    <ul id="commit-files" aria-label="Files included by stage all"></ul>
+    <label>Commit message <input id="commit-message" type="text" autocomplete="off"></label>
+    <p class="muted">This is a status snapshot. Confirming stages the whole working tree with <code>git add -A</code>.</p>
+    <div class="row">
+      <button id="commit-cancel" class="ghost">Cancel</button>
+      <button id="commit-confirm" class="primary">Stage all and commit</button>
     </div>
   </dialog>
 
@@ -67,6 +95,7 @@
   <div id="funnel-panel" hidden></div>
 
   <script src="/markdown.js"></script>
+  <script src="/editor-state.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

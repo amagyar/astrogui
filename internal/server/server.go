@@ -190,6 +190,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/collections/{name}/entries/{post}/assets", s.guardCollection(s.handleUploadAsset))
 	s.mux.HandleFunc("GET /api/collections/{name}/entries/{post}/assets/{file}", s.guardCollection(s.handleAsset))
 	s.mux.HandleFunc("GET /api/collections/{name}/funnel", s.guardCollection(s.handleFunnel))
+	s.mux.HandleFunc("GET /api/collections/{name}/git-status", s.guardCollection(s.handleGitStatus))
 	s.mux.HandleFunc("POST /api/collections/{name}/commit", s.guardCollection(s.handleCommit))
 }
 
@@ -431,12 +432,13 @@ func (s *Server) handleSaveBody(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 403, err)
 		return
 	}
-	err = posts.SaveBody(p.File, []byte(req.Body), req.ModTime)
+	err = posts.SaveBodyGuarded(s.app.Guard, p.File, []byte(req.Body), req.ModTime)
 	var conflict *posts.ConflictError
 	if errors.As(err, &conflict) {
 		writeJSON(w, 409, map[string]any{
-			"error":   err.Error(),
-			"current": string(conflict.Current),
+			"error":          err.Error(),
+			"current":        string(conflict.Current),
+			"currentModTime": conflict.CurrentMod,
 		})
 		return
 	}
@@ -514,10 +516,14 @@ func (s *Server) handleSaveFrontmatter(w http.ResponseWriter, r *http.Request) {
 		out = append(out, p.Bytes()...)
 	}
 
-	err = posts.WriteFile(p.File, out, p.Bytes(), req.ModTime)
+	err = posts.WriteFileGuarded(s.app.Guard, p.File, out, p.Bytes(), req.ModTime)
 	var conflict *posts.ConflictError
 	if errors.As(err, &conflict) {
-		writeJSON(w, 409, map[string]any{"error": err.Error(), "current": string(conflict.Current)})
+		writeJSON(w, 409, map[string]any{
+			"error":          err.Error(),
+			"current":        string(conflict.Current),
+			"currentModTime": conflict.CurrentMod,
+		})
 		return
 	}
 	if err != nil {
@@ -547,10 +553,14 @@ func (s *Server) handleSaveRaw(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 403, err)
 		return
 	}
-	err = posts.WriteFile(p.File, []byte(req.Content), p.Bytes(), req.ModTime)
+	err = posts.WriteFileGuarded(s.app.Guard, p.File, []byte(req.Content), p.Bytes(), req.ModTime)
 	var conflict *posts.ConflictError
 	if errors.As(err, &conflict) {
-		writeJSON(w, 409, map[string]any{"error": err.Error(), "current": string(conflict.Current)})
+		writeJSON(w, 409, map[string]any{
+			"error":          err.Error(),
+			"current":        string(conflict.Current),
+			"currentModTime": conflict.CurrentMod,
+		})
 		return
 	}
 	if err != nil {
@@ -643,6 +653,19 @@ func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleGitStatus(w http.ResponseWriter, r *http.Request) {
+	status, err := vcs.Status(s.app.Project)
+	if errors.Is(err, vcs.ErrUnavailable) {
+		writeErr(w, http.StatusServiceUnavailable, err)
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, status)
+}
+
 // handleUploadAsset stores a pasted image in the post's own directory.
 func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -673,26 +696,36 @@ func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request) {
 	}
 	// A useful, unique name: never fail because the paste had no name.
 	final := name + ext
-	for i := 2; ; i++ {
-		if _, err := os.Stat(filepath.Join(p.Dir, final)); err != nil {
-			break
-		}
-		final = fmt.Sprintf("%s-%d%s", name, i, ext)
-	}
-
 	data, err := decodeBase64(req.DataB64)
 	if err != nil {
 		writeErr(w, 400, fmt.Errorf("invalid image data: %w", err))
 		return
 	}
-	target := filepath.Join(p.Dir, final)
-	if err := s.app.Guard.Check(target); err != nil {
-		writeErr(w, 403, err)
-		return
-	}
-	if err := os.WriteFile(target, data, 0o644); err != nil {
-		writeErr(w, 500, err)
-		return
+	for i := 1; ; i++ {
+		if i > 1 {
+			final = fmt.Sprintf("%s-%d%s", name, i, ext)
+		}
+		target := filepath.Join(p.Dir, final)
+		file, err := s.app.Guard.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		if err != nil {
+			writeErr(w, 403, err)
+			return
+		}
+		if _, err := file.Write(data); err != nil {
+			_ = file.Close()
+			_ = s.app.Guard.Remove(target)
+			writeErr(w, 500, err)
+			return
+		}
+		if err := file.Close(); err != nil {
+			_ = s.app.Guard.Remove(target)
+			writeErr(w, 500, err)
+			return
+		}
+		break
 	}
 	writeJSON(w, 201, map[string]any{"name": final})
 }

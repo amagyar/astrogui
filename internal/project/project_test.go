@@ -153,6 +153,38 @@ func TestSingleCollectionSkipsPrompt(t *testing.T) {
 	}
 }
 
+func TestResolveCollectionHonorsValidPreferenceWithoutPrompt(t *testing.T) {
+	cols := []Collection{
+		{Name: "blog", Dir: "/p/src/content/blog"},
+		{Name: "notes", Dir: "/p/src/content/notes"},
+	}
+	var out bytes.Buffer
+	chosen, configured, err := ResolveCollection(cols, "notes", strings.NewReader(""), &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !configured || chosen.Name != "notes" || out.Len() != 0 {
+		t.Fatalf("ResolveCollection = %+v, configured=%v, prompt=%q", chosen, configured, out.String())
+	}
+}
+
+func TestResolveCollectionPromptsForMissingOrStalePreference(t *testing.T) {
+	cols := []Collection{
+		{Name: "blog", Dir: "/p/src/content/blog"},
+		{Name: "notes", Dir: "/p/src/content/notes"},
+	}
+	for _, preferred := range []string{"", "removed"} {
+		var out bytes.Buffer
+		chosen, configured, err := ResolveCollection(cols, preferred, strings.NewReader("2\n"), &out)
+		if err != nil {
+			t.Fatalf("preference %q: %v", preferred, err)
+		}
+		if configured || chosen.Name != "notes" || !strings.Contains(out.String(), "Which collection") {
+			t.Errorf("preference %q: got %+v configured=%v prompt=%q", preferred, chosen, configured, out.String())
+		}
+	}
+}
+
 // TestUserOverrideTakesPrecedence verifies a configured content directory
 // wins over the detected one (task 2.2).
 func TestUserOverrideTakesPrecedence(t *testing.T) {

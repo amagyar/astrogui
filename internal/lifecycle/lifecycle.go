@@ -17,6 +17,7 @@ import (
 	"github.com/astrogui/astrogui/internal/cache"
 	"github.com/astrogui/astrogui/internal/posts"
 	"github.com/astrogui/astrogui/internal/safe"
+	"github.com/goccy/go-yaml"
 )
 
 // ErrDestinationExists is returned when a move's destination already holds a
@@ -176,7 +177,7 @@ func (m *Manager) Move(name, from, to string) error {
 		}
 	}
 
-	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+	if err := m.Guard.MkdirAll(dstDir, 0o755); err != nil {
 		return fmt.Errorf("lifecycle: preparing destination: %w", err)
 	}
 	if err := m.rename(src, dst); err != nil {
@@ -349,15 +350,29 @@ func (m *Manager) Create(state, name string, frontmatter map[string]any, body []
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		sb.WriteString(yamlLine(k, frontmatter[k]))
+		line, err := yamlLine(k, frontmatter[k])
+		if err != nil {
+			return nil, fmt.Errorf("lifecycle: encoding frontmatter field %q: %w", k, err)
+		}
+		sb.WriteString(line)
 	}
 	sb.WriteString("---\n")
 	sb.Write(body)
 
-	if err := os.MkdirAll(postDir, 0o755); err != nil {
+	if err := m.Guard.MkdirAll(postDir, 0o755); err != nil {
 		return nil, fmt.Errorf("lifecycle: creating %s: %w", postDir, err)
 	}
-	if err := os.WriteFile(index, []byte(sb.String()), 0o644); err != nil {
+	file, err := m.Guard.OpenFile(index, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return nil, fmt.Errorf("lifecycle: creating %s: %w", index, err)
+	}
+	if _, err := file.Write([]byte(sb.String())); err != nil {
+		_ = file.Close()
+		_ = m.Guard.Remove(index)
+		return nil, fmt.Errorf("lifecycle: writing %s: %w", index, err)
+	}
+	if err := file.Close(); err != nil {
+		_ = m.Guard.Remove(index)
 		return nil, fmt.Errorf("lifecycle: writing %s: %w", index, err)
 	}
 	p, err := posts.Read(index)
@@ -369,11 +384,10 @@ func (m *Manager) Create(state, name string, frontmatter map[string]any, body []
 }
 
 // yamlLine renders one scalar frontmatter line.
-func yamlLine(key string, value any) string {
-	switch v := value.(type) {
-	case string:
-		return fmt.Sprintf("%s: %s\n", key, v)
-	default:
-		return fmt.Sprintf("%s: %v\n", key, v)
+func yamlLine(key string, value any) (string, error) {
+	data, err := yaml.Marshal(map[string]any{key: value})
+	if err != nil {
+		return "", err
 	}
+	return string(data), nil
 }

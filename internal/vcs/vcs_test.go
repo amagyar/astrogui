@@ -111,6 +111,24 @@ func TestPushFailureReportedNotSuccessful(t *testing.T) {
 	}
 }
 
+func TestCommitAndPushPreservesCommitFailureOutput(t *testing.T) {
+	repo, _ := gitRepo(t)
+	if err := os.WriteFile(filepath.Join(repo, "newfile.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hook := filepath.Join(repo, ".git", "hooks", "pre-commit")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\necho commit-hook-output >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r, err := CommitAndPush(repo, "will fail")
+	if err == nil {
+		t.Fatal("commit hook failure reported as success")
+	}
+	if r == nil || r.Command != "git commit -m will fail" || !strings.Contains(r.Output, "commit-hook-output") {
+		t.Fatalf("commit failure result lost: %+v (%v)", r, err)
+	}
+}
+
 // TestMoveTriggersNoVersionControlOperation verifies staging stays separate
 // from moves: after a move the working tree simply shows the change unstaged
 // (task 6.3, in the vcs domain: commit is the only staging path).
@@ -155,5 +173,66 @@ func TestUnavailableCommandReportedPlainly(t *testing.T) {
 	}
 	if _, err := Commit(repo, "message"); err == nil {
 		t.Fatal("commit without git on PATH reported success")
+	}
+}
+
+func TestParsePorcelainZHandlesSpacesAndRenames(t *testing.T) {
+	data := []byte("M  staged file.txt\x00 M modified file.txt\x00?? newline\nname.md\x00R  renamed to.txt\x00old name.txt\x00")
+	changes, err := parsePorcelainZ(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 4 {
+		t.Fatalf("got %d changes: %+v", len(changes), changes)
+	}
+	want := []FileChange{
+		{Status: "M ", Path: "staged file.txt"},
+		{Status: " M", Path: "modified file.txt"},
+		{Status: "??", Path: "newline\nname.md"},
+		{Status: "R ", Path: "old name.txt -> renamed to.txt"},
+	}
+	for i := range want {
+		if changes[i] != want[i] {
+			t.Errorf("change[%d] = %+v, want %+v", i, changes[i], want[i])
+		}
+	}
+}
+
+func TestStatusIsReadOnlyAndReportsStagedAndUntrackedPaths(t *testing.T) {
+	repo, _ := gitRepo(t)
+	staged := filepath.Join(repo, "staged file.txt")
+	if err := os.WriteFile(staged, []byte("staged"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", repo, "add", "--", "staged file.txt").CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	untrackedName := "newline\nname.md"
+	if err := os.WriteFile(filepath.Join(repo, untrackedName), []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	status, err := Status(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Clean || len(status.Changes) != 2 {
+		t.Fatalf("status = %+v", status)
+	}
+	foundStaged, foundUntracked := false, false
+	for _, change := range status.Changes {
+		if change.Status == "A " && change.Path == "staged file.txt" {
+			foundStaged = true
+		}
+		if change.Status == "??" && change.Path == untrackedName {
+			foundUntracked = true
+		}
+	}
+	if !foundStaged || !foundUntracked {
+		t.Fatalf("status omitted staged/untracked paths: %+v", status.Changes)
+	}
+	// Status is a preview only; it must not alter the index.
+	out, err := exec.Command("git", "-C", repo, "diff", "--cached", "--name-only").CombinedOutput()
+	if err != nil || strings.TrimSpace(string(out)) != "staged file.txt" {
+		t.Fatalf("status changed the index: %q %v", out, err)
 	}
 }

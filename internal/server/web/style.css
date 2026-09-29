@@ -27,11 +27,18 @@ input, textarea { font: inherit; color: var(--text); background: var(--panel); b
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; cursor: grab; }
 .card:hover { border-color: var(--accent); }
 .card h3 { margin: 0 0 4px; font-size: 14px; }
+.card-open { width: 100%; padding: 0; border: 0; background: transparent; border-radius: 0; text-align: left; font-weight: 650; }
+.card-open:hover { border-color: transparent; color: var(--accent); }
+.card-open:focus-visible, .move-control select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .card .snippet { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
 .card .signals { display: flex; gap: 10px; font-size: 11px; color: var(--muted); }
 .card .signals .stalled { color: var(--warn); font-weight: 600; }
 .card .signals .loose { color: var(--accent); }
 .card.readonly { opacity: 0.75; }
+.move-control { display: flex; justify-content: flex-end; margin-top: 7px; }
+.move-control select { font: inherit; font-size: 11px; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 3px 6px; }
+.move-control select:disabled { opacity: .7; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 0; width: min(94vw, 1100px); height: min(94vh, 800px); }
 dialog::backdrop { background: rgba(0,0,0,0.6); }
@@ -56,6 +63,7 @@ dialog h3 { margin: 0; }
 .markdown img { max-width: 100%; }
 .markdown img.broken { border: 2px dashed var(--bad); padding: 12px; }
 .markdown .footnote { color: var(--muted); font-size: 12px; }
+.markdown .external-image { display: inline-block; border: 1px dashed var(--line); border-radius: 4px; padding: 4px 8px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 
 #funnel-panel { position: fixed; right: 16px; bottom: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; z-index: 10; }
 #funnel-panel table td { padding: 2px 10px; }
@@ -84,3 +92,37 @@ dialog h3 { margin: 0; }
 #check-pop .note { margin: 9px 0 0; font-size: 12px; }
 dialog#report, dialog#conflict { width: min(90vw, 560px); height: auto; }
 dialog#conflict p, dialog#report p { margin: 10px 0 14px; }
+dialog#commit-review { width: min(90vw, 700px); height: auto; padding: 16px; }
+#commit-files { max-height: 38vh; overflow: auto; padding-left: 28px; font: 12px/1.5 ui-monospace, monospace; }
+#commit-files li { overflow-wrap: anywhere; }
+#conflict-versions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 8px 14px; }
+#conflict-versions label { display: grid; gap: 4px; min-width: 0; }
+#conflict-mine, #conflict-disk { width: 100%; height: 180px; resize: vertical; font: 12px/1.4 ui-monospace, monospace; }
+dialog#unsaved { width: min(90vw, 520px); height: auto; padding: 16px; }
+
+@media (max-width: 1000px) {
+  #topbar { flex-wrap: wrap; }
+  #board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  #capture-input { width: min(32vw, 320px); }
+}
+
+@media (max-width: 700px) {
+  #topbar { gap: 7px; padding: 8px; }
+  #projectline { flex: 1 1 100%; order: 2; overflow-wrap: anywhere; }
+  #topbar > .spacer { display: none; }
+  .capture { flex: 1 1 100%; min-width: 0; order: 3; }
+  #capture-input { width: 100%; min-width: 0; }
+  #topbar > button { flex: 1 1 auto; }
+  #board { grid-template-columns: minmax(0, 1fr); gap: 9px; padding: 9px; }
+  .card .signals { flex-wrap: wrap; gap: 5px 9px; }
+  #editor[open] { width: 100vw; height: 100dvh; max-width: 100vw; max-height: 100dvh; margin: 0; border-radius: 0; }
+  #editor > header { flex-wrap: wrap; gap: 6px; padding: 8px; }
+  #editor-title { flex: 1 1 100%; order: 3; overflow-wrap: anywhere; }
+  #editor-meta { gap: 7px; padding: 8px; }
+  #split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(34vh, 1fr) minmax(34vh, 1fr); overflow-y: auto; }
+  #source, #preview { min-height: 34vh; }
+  #preview { border-left: 0; border-top: 1px solid var(--line); }
+  #conflict-versions { grid-template-columns: minmax(0, 1fr); }
+  #conflict-mine, #conflict-disk { height: 130px; }
+  .row { flex-wrap: wrap; }
+}

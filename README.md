@@ -46,6 +46,11 @@ astrogui version    # print the version
 astrogui --help     # usage
 ```
 
+If the project defines several content collections, astrogui asks which one
+to manage on the first run and remembers that selection in its own config. If
+the browser cannot be opened automatically, the serving URL is printed so you
+can open it manually.
+
 Requirements: an Astro project with a content collection defined over a
 directory using the `glob()` loader.
 
@@ -85,6 +90,14 @@ derived cache (`cache.json`, first-seen timestamps and the funnel's recorded
 transitions) lives beside it. Both are disposable: delete them and the board
 rebuilds from the filesystem.
 
+The per-project `collection` setting records the selected collection when a
+project has more than one; if that collection is removed or renamed, astrogui
+asks for a replacement and remembers it.
+
+On the board, tab to a post title and press Enter to open it; use the card's
+“Move to” menu to transition without dragging. Drag-and-drop remains available
+for pointer users.
+
 ## The operating boundary
 
 > **Your content, and the commands you already run.**
@@ -99,8 +112,10 @@ rebuilds from the filesystem.
   manifest, and a project that has never run it builds identically.
 - Version control stays yours: a move performs **no** git operation. The
   commit and commit-and-push buttons run exactly `git add -A`, `git commit`,
-  `git push` in your repository — the commands you already run yourself —
-  and a failure is reported with its full output, never as success.
+  `git push` in your repository — the commands you already run yourself. The
+  interface previews the stage-all file list and asks for confirmation before
+  running them; the preview is a snapshot of the working tree. A failure is
+  reported with its command and full output, never as success.
 - A move that cannot be atomic is refused: if the draft and content
   directories sit on different filesystems, astrogui names both locations
   and leaves the post untouched rather than performing a non-atomic copy.
@@ -134,6 +149,11 @@ fences and their metadata, footnotes, images), and do not expect the
 published site's styling, Shiki highlighting, or optimized images — the
 blog's own dev server is the fidelity tool. Nothing you type is normalized:
 saving stores your bytes exactly, and an unchanged file is never rewritten.
+External image URLs are shown as blocked placeholders in the local preview;
+astrogui does not fetch them while rendering a post. If you leave an editor
+with unsaved body or metadata changes, it offers to keep editing, discard, or
+save. When the file changes externally, the conflict dialog shows both
+versions and requires an explicit choice before replacing either one.
 
 ## Development
 
