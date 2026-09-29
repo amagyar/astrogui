@@ -1,0 +1,8 @@
+{
+  "name": "@astrogui/darwin-arm64",
+  "version": "0.0.0",
+  "description": "The astrogui binary for arm64 on darwin. Stub package; release publishing replaces it with the real binary.",
+  "license": "MIT",
+  "os": ["darwin"],
+  "cpu": ["arm64"]
+}

@@ -1,0 +1,86 @@
+:root {
+  --bg: #14161a; --panel: #1d2026; --card: #24282f; --line: #323742;
+  --text: #e6e8ec; --muted: #8b93a1; --accent: #7aa2f7; --warn: #e0af68; --bad: #f7768e;
+  --ok: #9ece6a;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.45 -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+button { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: #10131a; font-weight: 600; }
+button.ghost { background: transparent; }
+input, textarea { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+.muted { color: var(--muted); }
+.spacer { flex: 1; }
+.row { display: flex; gap: 8px; justify-content: flex-end; }
+
+#topbar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--bg); z-index: 5; }
+.brand { font-weight: 700; }
+.brand span { color: var(--accent); }
+.capture { display: flex; gap: 6px; }
+#capture-input { width: 320px; }
+
+#board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding: 14px; align-items: start; }
+.column { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px; min-height: 200px; }
+.column.dragover { outline: 2px dashed var(--accent); }
+.column h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 2px 4px 10px; display: flex; justify-content: space-between; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; cursor: grab; }
+.card:hover { border-color: var(--accent); }
+.card h3 { margin: 0 0 4px; font-size: 14px; }
+.card .snippet { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+.card .signals { display: flex; gap: 10px; font-size: 11px; color: var(--muted); }
+.card .signals .stalled { color: var(--warn); font-weight: 600; }
+.card .signals .loose { color: var(--accent); }
+.card.readonly { opacity: 0.75; }
+
+dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 10px; padding: 0; width: min(94vw, 1100px); height: min(94vh, 800px); }
+dialog::backdrop { background: rgba(0,0,0,0.6); }
+dialog header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+dialog h3 { margin: 0; }
+#editor[open] { display: flex; flex-direction: column; }
+#editor-meta { display: flex; gap: 12px; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+#raw-wrap { padding: 8px 14px; border-bottom: 1px solid var(--line); }
+#raw-fm { width: 100%; min-height: 110px; font-family: ui-monospace, monospace; }
+#split { display: grid; grid-template-columns: 1fr 1fr; flex: 1; min-height: 0; }
+#source { border: 0; border-radius: 0; resize: none; padding: 14px; font-family: ui-monospace, monospace; font-size: 13px; }
+#preview { overflow: auto; padding: 14px 20px; border-left: 1px solid var(--line); }
+#editor-status { padding: 6px 14px; border-top: 1px solid var(--line); min-height: 28px; }
+
+.markdown h1, .markdown h2, .markdown h3 { border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+.markdown pre { background: #101216; border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow: auto; }
+.markdown code { font-family: ui-monospace, monospace; background: #101216; padding: 1px 4px; border-radius: 4px; }
+.markdown pre code { padding: 0; background: none; }
+.markdown blockquote { border-left: 3px solid var(--accent); margin: 8px 0; padding: 2px 12px; color: var(--muted); }
+.markdown table { border-collapse: collapse; }
+.markdown th, .markdown td { border: 1px solid var(--line); padding: 4px 10px; }
+.markdown img { max-width: 100%; }
+.markdown img.broken { border: 2px dashed var(--bad); padding: 12px; }
+.markdown .footnote { color: var(--muted); font-size: 12px; }
+
+#funnel-panel { position: fixed; right: 16px; bottom: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; z-index: 10; }
+#funnel-panel table td { padding: 2px 10px; }
+#report pre { max-height: 50vh; overflow: auto; white-space: pre-wrap; word-break: break-word; background: #101216; padding: 10px; border-radius: 8px; }
+
+/* Check button: the button itself carries the verdict. Success goes green
+   with a pop; failure shakes and anchors a panel of named problems. */
+#editor-check { transition: background-color .25s, border-color .25s, color .25s; min-width: 78px; }
+#editor-check.success { background: var(--ok); border-color: var(--ok); color: #10131a; font-weight: 600; animation: check-pop .45s ease; }
+#editor-check.fail { border-color: var(--bad); color: var(--bad); animation: check-shake .4s ease; }
+@keyframes check-pop { 0% { transform: scale(1); } 40% { transform: scale(1.15); } 100% { transform: scale(1); } }
+@keyframes check-shake { 0%, 100% { transform: translateX(0); } 20% { transform: translateX(-4px); } 40% { transform: translateX(4px); } 60% { transform: translateX(-3px); } 80% { transform: translateX(3px); } }
+
+#check-pop {
+  position: fixed; z-index: 60; width: 340px;
+  background: var(--card); border: 1px solid var(--bad); border-radius: 10px;
+  padding: 10px 12px; box-shadow: 0 10px 28px rgba(0,0,0,.55);
+}
+#check-pop strong { color: var(--bad); font-size: 13px; }
+#check-pop ul { list-style: none; margin: 6px 0 0; padding: 0; }
+#check-pop li { display: flex; gap: 8px; align-items: baseline; padding: 7px 0 0; border-top: 1px solid var(--line); margin-top: 7px; font-size: 13px; }
+#check-pop li:first-child { border-top: 0; margin-top: 6px; }
+#check-pop li .msg { flex: 1; }
+#check-pop li .jump { flex: none; font-size: 11px; color: var(--accent); background: transparent; border-color: var(--line); }
+#check-pop li .jump:hover { border-color: var(--accent); }
+#check-pop .note { margin: 9px 0 0; font-size: 12px; }
+dialog#report, dialog#conflict { width: min(90vw, 560px); height: auto; }
+dialog#conflict p, dialog#report p { margin: 10px 0 14px; }

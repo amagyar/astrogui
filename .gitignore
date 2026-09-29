@@ -1,0 +1,17 @@
+# Build artifacts
+/astrogui
+/npm/bin/
+dist/
+.astro/
+testdata/e2e-blog/drafts/
+testdata/e2e-blog/src/content/blog/*/
+!testdata/e2e-blog/src/content/blog/.gitkeep
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+
+# Test scratch
+/tmp-e2e/

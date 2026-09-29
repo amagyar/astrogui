@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>astrogui</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand">astro<span>gui</span></div>
+    <div id="projectline" class="muted"></div>
+    <div class="spacer"></div>
+    <div class="capture">
+      <input id="capture-input" type="text" placeholder="Capture an idea — one line is enough" autocomplete="off">
+      <button id="capture-btn" title="Capture (Enter)">+</button>
+    </div>
+    <button id="funnel-btn" class="ghost">Funnel</button>
+    <button id="commit-btn" class="ghost">Commit…</button>
+    <button id="push-btn" class="ghost">Commit &amp; push…</button>
+  </header>
+
+  <main id="board"></main>
+
+  <dialog id="editor">
+    <header>
+      <button id="editor-back" class="ghost">&larr; Board</button>
+      <div id="editor-title" class="muted"></div>
+      <div class="spacer"></div>
+      <button id="editor-check" class="ghost">Check</button>
+      <button id="editor-save" class="primary">Save</button>
+    </header>
+    <div id="editor-meta">
+      <label>Title <input id="fm-title" type="text"></label>
+      <label>Date <input id="fm-date" type="date"></label>
+      <button id="fm-save" class="ghost">Save fields</button>
+      <button id="fm-raw-toggle" class="ghost">Raw frontmatter</button>
+      <span id="editor-flags" class="muted"></span>
+    </div>
+    <div id="raw-wrap" hidden>
+      <textarea id="raw-fm" spellcheck="false"></textarea>
+      <button id="raw-save" class="ghost">Save raw</button>
+    </div>
+    <div id="split">
+      <textarea id="source" spellcheck="false"></textarea>
+      <div id="preview" class="markdown"></div>
+    </div>
+    <div id="check-pop" hidden></div>
+    <div id="editor-status" class="muted"></div>
+  </dialog>
+
+  <dialog id="conflict">
+    <h3>The post changed on disk while you edited it</h3>
+    <p id="conflict-detail"></p>
+    <div class="row">
+      <button id="conflict-reload" class="primary">Load the on-disk version</button>
+      <button id="conflict-keep" class="ghost">Keep editing mine</button>
+    </div>
+  </dialog>
+
+  <dialog id="report">
+    <h3 id="report-title"></h3>
+    <pre id="report-body"></pre>
+    <div class="row"><button id="report-close" class="primary">Close</button></div>
+  </dialog>
+
+  <div id="funnel-panel" hidden></div>
+
+  <script src="/markdown.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

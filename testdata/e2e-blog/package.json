@@ -1,0 +1,12 @@
+{
+  "name": "astrogui-e2e-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "astro": "astro",
+    "build": "astro build"
+  },
+  "dependencies": {
+    "astro": "^7.0.0"
+  }
+}
