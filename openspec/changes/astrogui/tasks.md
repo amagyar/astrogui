@@ -6,8 +6,7 @@
 - [ ] 1.2 Add a version command stamped at build time, and verify the reported version matches the value passed to the linker
 - [ ] 1.3 Define the tool's own configuration file format (draft directories, content directory override, staleness threshold), defaulting to `drafts/ideas`, `drafts/wip`, and the detected content directory, and verify a config round-trips and that absent keys fall back to defaults
 - [ ] 1.4 Create the npm package with a small JavaScript shim that execs the platform binary, plus per-platform optional dependency stubs, and verify the shim resolves and runs the binary locally
-- [ ] 1.5 Write the Homebrew formula against the release artifact layout, and verify `brew style` passes and the formula's URL and checksum placeholders are documented in the repository
-- [ ] 1.6 Document the install paths for npm and Homebrew, and verify each documented command is the one the repository actually implements
+- [ ] 1.5 Document the npm install path, and verify each documented command is the one the repository actually implements
 
 ## 2. Project resolution and the write boundary
 
@@ -24,6 +23,7 @@
 - [ ] 3.3 Derive per-post metadata — first seen, last modified, body size, referenced image count — and verify the values match the filesystem for a fixture with known timestamps
 - [ ] 3.4 Watch the managed directories and emit change events for create, modify, rename, and delete, and verify a post created outside the tool produces an event
 - [ ] 3.5 Store first-seen timestamps in a derived cache under the tool's own directory, and verify deleting the cache leaves the board fully reconstructible with no post lost
+- [ ] 3.6 Record state transitions observed while running in the derived cache, and verify a move recorded in one session is reported by the funnel after a restart and that deleting the cache loses only that derived history
 
 ## 4. Lifecycle moves and the publish gate
 
@@ -33,7 +33,8 @@
 - [ ] 4.4 Implement pre-flight checks covering missing referenced images, missing title, unparseable or future publication date, and empty body, and verify each failure blocks the move and names the specific problem
 - [ ] 4.5 Verify a post referencing an asset outside its own directory fails the pre-flight check, and that the failure names the offending reference
 - [ ] 4.6 Refuse a move whose destination already exists, and verify both posts are left unchanged
-- [ ] 4.7 Add a test that a move is recorded as a rename by version control, so the post's history is continuous across states
+- [ ] 4.7 Verify a move applied to a post with committed history is reported by git as a rename, and that moving a never-committed post presents no history discontinuity
+- [ ] 4.8 Refuse a move whose source and destination are on different filesystems, and verify the refusal names both locations and leaves the post unchanged (a cross-device rename failure can be simulated in tests)
 
 ## 5. Local server and its security controls
 
@@ -42,7 +43,7 @@
 - [ ] 5.3 Validate the `Host` header against the expected origin and reject mismatches, and verify a rebinding-style hostname is refused
 - [ ] 5.4 Mint a session token at startup, deliver it in the URL fragment, and require it on every API call, and verify a request without it is refused with no filesystem effect
 - [ ] 5.5 Serve a post's assets only from that post's directory, resolving containment by real path, and verify a traversal attempt and a symlink escape are both refused while a legitimate image is served
-- [ ] 5.6 Report a port conflict and either select a free port or exit, and verify the tool never silently takes over a port it does not own
+- [ ] 5.6 Report a port conflict, select a free port, and announce the address actually being served, and verify the tool never silently takes over a port it does not own
 - [ ] 5.7 Add tests asserting the interface is reachable only from loopback and that no filesystem-affecting endpoint responds without the session token
 
 ## 6. Version control actions
@@ -72,11 +73,13 @@
 - [ ] 8.7 Verify no frontmatter rewrite occurs when no field changed
 - [ ] 8.8 Save a pasted image into the post's own directory and insert a relative reference at the insertion point, and verify the reference resolves before and after a publish move
 - [ ] 8.9 Name an unnamed post and its pasted image usefully rather than failing, and verify the resulting post publishes successfully
+- [ ] 8.10 Refuse a save when the file changed on disk after it was opened, and verify the external change is preserved and surfaced rather than overwritten
+- [ ] 8.11 Render a fixture post containing an inline `<script>` and an event-handler attribute in the preview, and verify neither executes and no post-sourced script can obtain the session token
 
 ## 9. Integration
 
 - [ ] 9.1 Build a fixture Astro project with a `glob()` content collection and run the complete flow end to end: capture an idea, write it with an image, publish it, and confirm the project builds with the post visible at the expected URL
 - [ ] 9.2 Confirm a fixture project that has never run astrogui builds identically before and after, and that the project's dependency manifest is unchanged
-- [ ] 9.3 Verify a project whose content directory holds loose markdown files shows them read-only and is never rewritten, and that only drafts created by astrogui use the folder layout
+- [ ] 9.3 Verify a project whose content directory holds loose markdown files lists them read-only, that editing one through the raw text view leaves it a loose file in place, and that only drafts created by astrogui use the folder layout
 - [ ] 9.4 Verify the whole flow against a project with an unrecognised frontmatter field and a custom `generateId`, confirming the pinned slug still yields the expected URL
 - [ ] 9.5 Document the on-disk convention, the boundary rule, the pre-flight checks and their limits, and the preview's fidelity ceiling, and verify each documented behavior matches the implemented behavior

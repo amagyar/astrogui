@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Hosts the tool as a local binary with a filesystem-writing HTTP API, protects that API against cross-origin and rebinding attacks, and makes the binary installable through standard channels.
+Hosts the tool as a local binary with a filesystem-writing HTTP API, protects that API against cross-origin and rebinding attacks, and makes the binary installable without a build step.
 
 ## ADDED Requirements
 
@@ -19,7 +19,8 @@ The tool SHALL listen only on the loopback interface, so that it is not reachabl
 #### Scenario: Port selection
 
 - **WHEN** the tool starts and its preferred port is already in use
-- **THEN** it reports the conflict and either selects a free port or exits, and does not silently take over the port
+- **THEN** it reports the conflict and selects a free port, and serves on the port it reported
+- **AND** it never takes over a port another process is using
 
 ### Requirement: Cross-origin requests are refused
 
@@ -79,19 +80,19 @@ The tool SHALL invoke only operations the user already performs themselves, and 
 - **WHEN** an invoked command is not available in the environment
 - **THEN** the tool reports that plainly and does not report the action as successful
 
-### Requirement: Installable through standard channels
+#### Scenario: Command outside the consent rule is refused
 
-The tool SHALL be installable as a prebuilt binary through a global npm install and through a Homebrew formula, without a compilation step on the user's machine.
+- **WHEN** a configured action names a command that is not the user's own — not a project script, nor a build or version control command the user already runs
+- **THEN** the tool refuses to run it and names the rule it failed
+
+### Requirement: Installable without a build step
+
+The tool SHALL be installable as a prebuilt binary through a global npm install, without a compilation step on the user's machine.
 
 #### Scenario: Global npm install
 
 - **WHEN** the user installs the tool globally with npm on a supported platform and architecture
 - **THEN** a prebuilt binary for that platform is installed and the tool runs without any build step
-
-#### Scenario: Homebrew install
-
-- **WHEN** the user installs the tool with Homebrew
-- **THEN** a prebuilt binary is installed and the tool runs without any build step
 
 #### Scenario: Unsupported platform
 

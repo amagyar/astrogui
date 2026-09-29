@@ -46,7 +46,7 @@ The tool SHALL determine which directory holds the blog's published content, and
 
 ### Requirement: Write boundary
 
-The tool SHALL write only inside the directories it manages — the draft directories and the resolved content directory — and SHALL NOT write anywhere else in the project.
+The tool SHALL write inside the project only within the directories it manages — the draft directories and the resolved content directory. Outside the project, the tool SHALL write only its own configuration and derived data, which contain no user content.
 
 #### Scenario: Tool operation leaves unrelated project files untouched
 
@@ -74,6 +74,12 @@ The tool SHALL treat posts it did not create as read-only, and SHALL NOT restruc
 - **WHEN** the content directory already contains published posts stored as loose files rather than folders
 - **THEN** the tool lists them on the board and offers editing only through the raw text view
 - **AND** the tool does not move, migrate, or reformat them
+
+#### Scenario: Editing a loose post keeps it loose
+
+- **WHEN** the user edits a loose markdown post through the raw text view and saves
+- **THEN** the post remains a loose file in place
+- **AND** the tool does not convert it to a folder, relocate it, or alter its layout
 
 #### Scenario: Publishing never overwrites an existing post
 

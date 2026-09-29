@@ -34,10 +34,14 @@ The tool SHALL show, for each card, how long the post has existed, how recently 
 - **WHEN** the user creates a post
 - **THEN** its card reflects that the post was just created and just changed
 
-#### Scenario: Post captured as a bare idea
+### Requirement: Capturing an idea requires no structure
+
+The tool SHALL allow a new idea to be recorded from a single line of text, with no structured metadata required to create it.
+
+#### Scenario: Idea captured as a single line
 
 - **WHEN** the user captures an idea as a single line of text
-- **THEN** the idea is recorded without requiring any structured metadata to be supplied
+- **THEN** the idea becomes a card in the ideas column without any structured metadata having been supplied
 
 ### Requirement: Stalled work is identifiable
 
@@ -79,15 +83,19 @@ The tool SHALL keep the board consistent with the filesystem while it is running
 
 ### Requirement: Funnel history is derivable
 
-The tool SHALL be able to report how many posts have reached each state, using information it derives itself rather than requiring the user to record it.
+The tool SHALL report how many posts currently occupy each state from the filesystem alone, and SHALL record the state transitions it observes so progression through the pipeline can be reported without the user tracking it.
 
-#### Scenario: Funnel is reported without user input
+#### Scenario: Current counts come from the directories
 
 - **WHEN** the user views the funnel
-- **THEN** the counts of posts that have reached each state are reported
-- **AND** the user was not required to supply or maintain those counts
+- **THEN** the count shown for each state is the number of posts currently in that state's directory, with no stored data required
+
+#### Scenario: Progression is recorded as it happens
+
+- **WHEN** a post moves from one state to a later state while the tool is running
+- **THEN** the move is recorded in the tool's derived data, and the funnel can report how many captured ideas have advanced to each later state
 
 #### Scenario: Derived history is disposable
 
 - **WHEN** the tool's derived data is deleted
-- **THEN** the board is fully reconstructible from the filesystem, and no post is lost
+- **THEN** the board is fully reconstructible from the filesystem, no post is lost, and only the recorded progression is gone

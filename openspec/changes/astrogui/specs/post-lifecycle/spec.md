@@ -33,13 +33,19 @@ The tool SHALL perform every lifecycle transition as a single atomic filesystem 
 
 #### Scenario: Move preserves version history
 
-- **WHEN** a post is moved between states in a git repository
-- **THEN** version control records the move as a rename, so the post's history remains continuous across states
+- **WHEN** a post with committed history is moved between states in a git repository
+- **THEN** version control reports the move as a rename, so the post's history remains continuous across states
+- **AND** a post that was never committed had no history to lose; its move simply presents new files at the new location
 
 #### Scenario: Interrupted move
 
 - **WHEN** a move cannot complete
 - **THEN** the post remains entirely in its original state and the tool reports the failure
+
+#### Scenario: Move across filesystems is refused
+
+- **WHEN** a requested move has its source and destination on different filesystems, so no atomic rename exists
+- **THEN** the tool refuses the move, names both locations, and leaves the post unchanged
 
 ### Requirement: Publish is gated by a pre-flight check
 
@@ -67,17 +73,22 @@ The tool SHALL verify a post before moving it to the published state, and SHALL 
 
 ### Requirement: Published posts keep a stable URL
 
-The tool SHALL ensure a post's public URL is determined by the post's identity and does not change when the post is moved or when the surrounding directory layout changes.
+The tool SHALL ensure a post's public URL is determined by the post's identity and is unaffected by the post's location in the pipeline.
 
-#### Scenario: Folder-based post does not alter its URL
+#### Scenario: The URL derives from the pinned slug
 
-- **WHEN** a post is stored as a folder and published
-- **THEN** its public URL is derived from its slug, not from the folder or filename path it happens to occupy
+- **WHEN** a post created by the tool is published
+- **THEN** its entry id, and therefore its public URL, is derived from the `slug` the tool pinned at creation, not from the folder or file path it happens to occupy
 
-#### Scenario: Moving a post does not change its URL
+#### Scenario: Draft-state moves cannot affect the URL
 
-- **WHEN** a post is moved between lifecycle states
-- **THEN** the public URL of the post before and after the move is identical
+- **WHEN** a post is moved between draft states before publishing
+- **THEN** no collection entry or public URL exists to be affected, because draft directories lie outside every collection and the move does not touch the slug
+
+#### Scenario: The slug pin survives schema stripping
+
+- **WHEN** the project's collection schema does not declare `slug`
+- **THEN** the slug still pins the entry id at publish, because unknown frontmatter keys are stripped from entry data rather than rejected
 
 ### Requirement: Version control actions are explicit and separate
 

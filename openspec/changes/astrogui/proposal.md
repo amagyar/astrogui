@@ -30,11 +30,13 @@ that shows the whole pipeline at a glance and can never damage the writing.
   parse/serialize round trip); the right pane is a rendered reading copy.
 - Gate the publish move behind a pre-flight check that verifies the post can
   survive being seen by the blog's build.
-- Ship a Go binary distributed through npm (per-platform optional packages) and
-  Homebrew.
+- Ship a Go binary distributed through npm (per-platform optional packages);
+  Homebrew follows as a separate change against the same release artifacts.
 - Establish the operating boundary: **your content, and the commands you already
-  run.** astrogui writes only inside the user's own content directories and
-  otherwise only shells out to commands the user already invokes themselves.
+  run.** astrogui writes inside the project only in the user's own content
+  directories — apart from its own settings and derived cache, kept outside the
+  project — and otherwise only shells out to commands the user already invokes
+  themselves.
 
 ## Capabilities
 
@@ -69,7 +71,8 @@ None. This is the first change in the project; there are no existing specs.
 - **Requires an Astro blog with a content collection** using the `glob()` loader
   over a directory. Blogs without content collections are out of scope.
 - **User-visible filesystem convention.** Posts managed by astrogui are folders,
-  not loose `.md` files. Blogs that keep loose files are supported read-only;
-  existing published posts are never rewritten or migrated.
+  not loose `.md` files. Posts the tool did not create are never restructured:
+  loose files are listed, edited as raw text only, and never migrated to the
+  folder layout.
 - **Distribution surface.** npm global install across darwin/linux/win on amd64
-  and arm64, plus a Homebrew formula.
+  and arm64. The Homebrew formula is deferred to a later change.

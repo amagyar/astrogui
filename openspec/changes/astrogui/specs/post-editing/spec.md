@@ -25,6 +25,16 @@ The tool SHALL present the post's markdown body as the post's actual content, an
 - **WHEN** the tool determines that a post requires no change
 - **THEN** the tool does not rewrite the file, so its modification time is unchanged
 
+### Requirement: Saves do not overwrite concurrent edits
+
+The tool SHALL NOT save a post over changes made outside the editor after the post was opened.
+
+#### Scenario: File changed since it was opened
+
+- **WHEN** the user saves a post whose file changed on disk after the editor loaded it
+- **THEN** the tool does not overwrite the on-disk change, and reports the conflict with both versions available
+- **AND** no version is discarded without the user choosing
+
 ### Requirement: Rendered preview reflects the body
 
 The tool SHALL show a rendered reading copy of the post alongside the source, and SHALL keep it in step with the text being edited.
@@ -48,6 +58,20 @@ The tool SHALL show a rendered reading copy of the post alongside the source, an
 
 - **WHEN** the rendered pane is displayed
 - **THEN** it reflects the post's content, and it does not claim to reproduce the published site's styling, code highlighting, or image optimization
+
+### Requirement: The preview does not execute post content
+
+The tool SHALL ensure that script content embedded in a post cannot execute in the tool's interface.
+
+#### Scenario: Inline script in a post body
+
+- **WHEN** a post body contains an inline `<script>` element or an HTML event-handler attribute
+- **THEN** the rendered preview displays the post without executing that script
+
+#### Scenario: Post content cannot reach the session token
+
+- **WHEN** markup from a post is rendered in the preview
+- **THEN** it cannot obtain the session token or use it to call the tool's API
 
 ### Requirement: Structured fields are edited separately from the body
 

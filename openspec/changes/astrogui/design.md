@@ -67,7 +67,9 @@ only mechanism in this design capable of corrupting a post.
 **Alternative considered — store state in a tool-owned sidecar file.** Rejected
 as *state*, because it creates a second source of truth that can drift from the
 filesystem after a hand edit or a merge. It is used only for *derived* data, where
-drift is harmless because the value is recomputable.
+drift is harmless because the value is recomputable. Derived data covers
+first-seen timestamps and observed state transitions — both disposable, so
+progression history that predates the tool is not claimed.
 
 The consequence worth stating: because the board is a directory view, it is
 correct by construction and survives restart without a load step.
@@ -88,17 +90,36 @@ operation most likely to corrupt a post.
 
 The follow-on risk is that Astro derives an entry's id from its file path, so a
 nested `index.md` would produce a different id than the flat filename did. The
-mitigation is `slug`, a reserved frontmatter field that pins the entry id. Every
-post astrogui creates carries `slug: <post-name>`, so the published URL depends
-only on the post's identity and is unchanged by any move. This is what makes
-"move does not change the URL" true rather than merely intended.
+mitigation is `slug`: the content-layer documentation ("Defining custom IDs")
+states that a `slug` frontmatter property overrides the generated entry id, and
+`generateId()` receives the frontmatter before schema validation, so the pin
+holds even where the schema does not declare the field. Every post astrogui
+creates carries `slug: <post-name>`, so the published URL depends only on the
+post's identity and is unchanged by any move. This is what makes "move does not
+change the URL" true rather than merely intended.
 
-Unrecognised keys are stripped by Zod rather than rejected, so `slug` is inert on
-projects whose schema does not declare it.
+Unrecognised keys are stripped by Zod rather than rejected, so a schema that
+does not declare `slug` neither breaks the build nor surfaces the field in
+entry data — the id pin still applies.
 
 **Alternative considered — a single shared assets directory.** Fewer
 directories, but it imposes a convention on the blog and makes the publish move
 depend on assets that may be shared between posts.
+
+### A move that cannot be atomic is refused
+
+An `fs.rename` is atomic within one filesystem. Across filesystems — a draft
+directory on an external volume, a content directory on another mount — the
+operation degenerates into copy-then-delete, which has no atomic form. Rather
+than implement a transactional copy, astrogui refuses the move and names both
+locations. The guarantee that a move either fully succeeds or leaves both
+locations unchanged is preserved by never attempting the non-atomic path.
+Cross-volume layouts are rare for a single-author blog, and a user in that
+position can complete the move by hand exactly as they would without the tool.
+
+**Alternative considered — copy with rollback.** Rejected: it widens the
+surface of the one operation the whole design depends on staying trivial, to
+serve a layout the tool does not recommend.
 
 ### The editor has no document round trip
 
@@ -115,9 +136,15 @@ Structured frontmatter fields are edited through a form because the board needs
 a title and a date to render cards, and because requiring YAML to capture a
 one-line idea is a bad trade. This is the one place the round trip exists, so it
 is bounded three ways: a YAML library with a document/CST API that preserves
-comments and key order, a write only when a field actually changed, and a raw
-text view so any failure is recoverable by hand. Ideas skip the form entirely and
-are dated from the filesystem.
+comments and key order (in Go, `goccy/go-yaml` is the candidate;
+`gopkg.in/yaml.v3` does not round-trip comments reliably enough to promise
+this), a write only when a field actually changed, and a raw text view so any
+failure is recoverable by hand. Ideas skip the form entirely and are dated from
+the filesystem.
+
+Saving is guarded against concurrent modification: a save against a file that
+changed on disk since the editor opened it is refused rather than applied, so
+the editor can never silently discard an edit made in another tool.
 
 ### Preview is client-side
 
@@ -184,7 +211,7 @@ The server reads and writes the user's files over HTTP, which makes it a known
 vulnerability class rather than a hypothetical one — Vite has shipped multiple
 dev-server CVEs of this shape, most recently bypassing `server.fs.deny`.
 
-Four controls, all cheap:
+Five controls, all cheap:
 
 - Bind `127.0.0.1` only, so the port is unreachable from the network.
 - Validate the `Host` header against the expected origin, which is what defeats
@@ -194,6 +221,12 @@ Four controls, all cheap:
   A cross-origin page cannot read the fragment.
 - Resolve and confine asset paths by real path, after symlink resolution, against
   the post's own directory.
+- Treat post content as untrusted inside the tool's own page: the preview
+  neutralizes script elements and event-handler attributes, backed by a
+  Content-Security-Policy that forbids inline script. Without this, a hostile
+  draft pasted from the web is script executing at the tool's origin, able to
+  read the session token from the fragment — the same asset the four network
+  controls exist to protect.
 
 The host check and the token are belt and braces: either alone would be
 defensible, and together they cost on the order of a day.
@@ -211,9 +244,9 @@ defensible, and together they cost on the order of a day.
   This is the correct failure ordering.
 
 - **`slug` pins URLs, but a project with a custom `generateId` may behave
-  differently.** → Verified against the docs that `slug` is a reserved field
-  that overrides the generated id. Validate against a representative fixture
-  during implementation rather than assuming.
+  differently, since a custom function may ignore the slug.** → The docs
+  guarantee the override only for the default id generation. Validate against a
+  representative fixture during implementation rather than assuming.
 
 - **The heuristic pre-flight check cannot know what a given blog's schema
   actually requires.** → Accepted. A missing required field surfaces as a build
@@ -229,3 +262,8 @@ defensible, and together they cost on the order of a day.
 - **The tool holds the whole post in memory as text.** → Non-issue at blog
   scale; posts are kilobytes. Noted only so it is a known property rather than a
   surprise.
+- **Windows is in the distribution matrix but not in the daily loop.** → Rename
+  semantics on Windows can fail where POSIX succeeds (open handles, antivirus
+  locks), watcher behavior differs, and path containment must be tested against
+  backslash and drive-letter forms. The CI matrix includes a Windows runner from
+  the first release rather than as a retrofit.
