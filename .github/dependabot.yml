@@ -1,0 +1,51 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: daily
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: daily
+
+  - package-ecosystem: npm
+    directory: /npm
+    schedule:
+      interval: daily
+
+  - package-ecosystem: npm
+    directory: /npm/packages/darwin-arm64
+    schedule:
+      interval: daily
+
+  - package-ecosystem: npm
+    directory: /npm/packages/darwin-x64
+    schedule:
+      interval: daily
+
+  - package-ecosystem: npm
+    directory: /npm/packages/linux-arm64
+    schedule:
+      interval: daily
+
+  - package-ecosystem: npm
+    directory: /npm/packages/linux-x64
+    schedule:
+      interval: daily
+
+  - package-ecosystem: npm
+    directory: /npm/packages/win32-arm64
+    schedule:
+      interval: daily
+
+  - package-ecosystem: npm
+    directory: /npm/packages/win32-x64
+    schedule:
+      interval: daily
+
+  - package-ecosystem: npm
+    directory: /testdata/e2e-blog
+    schedule:
+      interval: daily
