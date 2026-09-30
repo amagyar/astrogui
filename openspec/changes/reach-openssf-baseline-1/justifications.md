@@ -27,10 +27,25 @@ These feed the badge-entry justifications drafted in task 7.1.
 
 ## Repository / GitHub settings (OSPS-AC, BR-07.01) — via gh api, 2026-09-30
 
+- Branch protection on `main` active (API read-back + live probe):
+  require pull request before merging (0 approvals required), force pushes
+  blocked, deletion blocked, enforced for admins too. A direct push of a
+  probe commit to `main` was rejected ("Changes must be made through a pull
+  request") and nothing landed.
 - secret_scanning: enabled
 - secret_scanning_push_protection: enabled
-- Branch protection on main: see tasks.md 6.1 result.
-- Collaborators: see tasks.md 6.3 result.
+- Push-protection probe honesty note: two synthetic invalid `ghp_` tokens
+  (all-caps and random mixed-case) pushed to a scratch branch were NOT
+  blocked and produced no secret-scanning alerts (checked immediately and
+  after delay). GitHub validity-filters non-functional credentials, so only
+  a real leaked token would be blocked. Remote and local probe branches were
+  deleted immediately; no synthetic token remains in the repository.
+- Collaborators: exactly one (amagyar, owner, admin). Personal repositories
+  have no org-style base permission; collaborators can only be added manually
+  with an explicit permission choice, and there are none besides the owner.
+- 2FA: GitHub has required two-factor authentication for all users who
+  actively contribute since March 2023 (platform mandate; the per-account
+  API field is not readable with the current token scope).
 
 ## Version control hygiene (OSPS-QA-02/04/05) — audited 2026-09-30
 

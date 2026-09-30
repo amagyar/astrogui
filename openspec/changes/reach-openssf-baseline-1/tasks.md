@@ -28,9 +28,9 @@
 
 ## 6. GitHub repository settings (OSPS-AC-01.01, AC-02.01, AC-03.01/03.02, BR-07.01)
 
-- [ ] 6.1 Enable branch protection on `main`: require pull request before merging, block force pushes, block branch deletion; verify by attempting a direct push to `main` (rejected) and reviewing the protection rules
-- [ ] 6.2 Enable secret scanning and push protection; verify with a dry-run push of a synthetic credential-shaped string to a scratch branch (blocked) and remove the string afterwards
-- [ ] 6.3 Verify collaborator default permission is the lowest available role and 2FA is enforced for the account/org; record the observed values for the AC-02.01 and AC-01.01 justifications
+- [x] 6.1 Enable branch protection on `main`: require pull request before merging, block force pushes, block branch deletion; verify by attempting a direct push to `main` (rejected) and reviewing the protection rules
+- [x] 6.2 Enable secret scanning and push protection; verify with a dry-run push of a synthetic credential-shaped string to a scratch branch (blocked) and remove the string afterwards
+- [x] 6.3 Verify collaborator default permission is the lowest available role and 2FA is enforced for the account/org; record the observed values for the AC-02.01 and AC-01.01 justifications
 
 ## 7. Badge entry update (project 15108, all 24 controls)
 
