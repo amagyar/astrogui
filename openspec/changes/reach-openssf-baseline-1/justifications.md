@@ -95,3 +95,17 @@ QA-01.02). The sixteen below are the new/changed entries.
   0.0.1-snapshot).
 - Release workflow gate re-checks archives and tarballs for the license
   before npm publish (positive + negative control verified locally).
+
+## Final result (task 7.3, 2026-09-30 16:49 UTC)
+
+Badge entry: 24/24 Baseline Level 1 controls answered — 23 Met + 1 N/A
+(QA-04.01, single repository). Badge status: passing; in_progress marker
+gone. All spec scenarios re-verified against live main post-merge: LICENSE
+resolves (200) and matches npm/goreleaser MIT declarations; goreleaser pins
+LICENSE into archives; the release workflow carries the license gate; the
+npm staging script validates package/LICENSE; README embeds the badge and
+carries the publish warning; branch protection read-back confirms require-PR,
+no-force-push, no-deletion, admin-enforced. Process note: the first badge
+save (88%, 21/24) preceded the merge, so the auto-checker correctly held
+DO-01.01/LE-03.01/LE-03.02 Unmet against main; merging PR #8 and re-saving
+the three controls with the drafted justifications completed the entry.
