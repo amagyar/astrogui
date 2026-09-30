@@ -126,6 +126,17 @@ function stampVersions(version) {
   console.log(`- stamped all seven package manifests at ${version}`);
 }
 
+function placeLicense() {
+  const license = path.join(repoRoot, "LICENSE");
+  if (!fs.existsSync(license)) die("missing LICENSE at repository root");
+  // Copied from the single root LICENSE at stage time so every npm tarball
+  // ships the license (OSPS-LE-03.02) without a second tracked copy.
+  for (const dir of [...TARGETS.map(platformDir), npmDir]) {
+    fs.copyFileSync(license, path.join(dir, "LICENSE"));
+  }
+  console.log("- copied LICENSE into all seven package directories");
+}
+
 function placeBinaries(distDir, version) {
   for (const t of TARGETS) {
     const binDir = path.join(platformDir(t), "bin");
@@ -157,7 +168,7 @@ function verifyTarballs(packed, version) {
   for (const { target: t, dir, tgz } of packed) {
     const name = t ? platformPkg(t) : LAUNCHER;
     const entries = run("tar", ["-tzf", tgz]).trim().split("\n").sort();
-    const expected = ["package/package.json", t ? `package/bin/${binaryName(t)}` : "package/index.js"];
+    const expected = ["package/package.json", "package/LICENSE", t ? `package/bin/${binaryName(t)}` : "package/index.js"];
     for (const entry of expected) {
       if (!entries.includes(entry)) die(`${name} tarball is missing ${entry} (has: ${entries.join(", ")})`);
     }
@@ -264,6 +275,7 @@ function main() {
     const outDir = path.resolve(args.out || path.join(distDir, "npm"));
     verifyArchives(distDir, version);
     stampVersions(version);
+    placeLicense();
     placeBinaries(distDir, version);
     const packed = packAll(outDir);
     const packages = verifyTarballs(packed, version);

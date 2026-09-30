@@ -24,6 +24,10 @@ archives:
     # Cask need only tar.
     formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # Pinned (not left to the default file set) so every release archive
+    # provably carries the license (OSPS-LE-03.02).
+    files:
+      - LICENSE
 
 checksum:
   name_template: "checksums.txt"

@@ -107,6 +107,21 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           node scripts/npm-release.mjs stage --version "$version" --dist dist
+      - name: Verify LICENSE ships in every artifact
+        # Defense in depth for OSPS-LE-03.02: the goreleaser config pins LICENSE
+        # into the archives and the stage script validates the npm tarballs;
+        # this gate re-checks both families before anything is published.
+        run: |
+          rc=0
+          for archive in dist/astrogui_*_*.tar.gz; do
+            tar -tzf "$archive" | grep -qx 'LICENSE' \
+              || { echo "::error::$archive is missing LICENSE"; rc=1; }
+          done
+          for tgz in dist/npm/*.tgz; do
+            tar -tzf "$tgz" | grep -qx 'package/LICENSE' \
+              || { echo "::error::$tgz is missing package/LICENSE"; rc=1; }
+          done
+          exit "$rc"
       - name: Publish (platform packages before the launcher)
         run: |
           version="${GITHUB_REF_NAME#v}"
