@@ -9,7 +9,7 @@
 
 ## 2. Security contact (OSPS-VM-02.01)
 
-- [ ] 2.1 Add `SECURITY.md` at repository root naming GitHub private vulnerability reporting as the reporting channel and stating acknowledgement/coordinated-disclosure expectations; verify the file renders on GitHub and the private reporting link is enabled in repo settings
+- [x] 2.1 Add `SECURITY.md` at repository root naming GitHub private vulnerability reporting as the reporting channel and stating acknowledgement/coordinated-disclosure expectations; verify the file renders on GitHub and the private reporting link is enabled in repo settings
 
 ## 3. User documentation (OSPS-DO-01.01)
 
