@@ -14,5 +14,8 @@ node_modules/
 # OS
 .DS_Store
 
+# Command Code
+.commandcode/
+
 # Test scratch
 /tmp-e2e/

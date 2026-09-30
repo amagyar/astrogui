@@ -22,7 +22,7 @@
     "@amagyar/astrogui-win32-x64": "0.0.0"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=26"
   },
   "keywords": [
     "astro",

@@ -19,6 +19,8 @@ compiles anything on your machine:
 npm install -g @amagyar/astrogui
 ```
 
+Requires Node 26 or newer.
+
 The npm package carries a small JavaScript shim plus per-platform optional
 packages (`@amagyar/astrogui-darwin-arm64`, `@amagyar/astrogui-linux-x64`, …),
 so the same install works on macOS, Linux, and Windows, on amd64 and arm64.
@@ -192,7 +194,7 @@ The shim, the launcher manifest, and the six platform manifests are covered
 by the Node test suite:
 
 ```sh
-node --test tests/*.test.mjs
+node --test "tests/**/*.test.mjs"
 ```
 
 ## License
