@@ -47,7 +47,9 @@ Notes:
 - npm requires the workflow's `id-token: write` permission, npm CLI ≥ 11.5.1
   and Node ≥ 22.14 — the workflow pins `npm@12.0.1` on Node 26.
 - npm checks that `repository.url` in each manifest matches the repository;
-  all seven manifests declare `git+https://github.com/amagyar/astrogui.git`.
+  all seven manifests declare `git+https://github.com/amagyar/astrogui.git`,
+  and staging fails if any packed tarball's manifest is missing it or
+  mismatches (the `422` provenance error only surfaces at publish time).
 - Workflow filename must be exactly `release.yml` (filename only, no path).
   Trusted publishing does not validate the configuration when you save it —
   mistakes surface only at publish time.
