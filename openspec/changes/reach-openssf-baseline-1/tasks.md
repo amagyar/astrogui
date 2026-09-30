@@ -23,8 +23,8 @@
 
 ## 5. Release workflow hardening pass (OSPS-BR-01.01, BR-01.03, BR-07.01 evidence)
 
-- [ ] 5.1 Audit `.github/workflows/release.yml` for unquoted shell interpolations of `GITHUB_REF_NAME` and other workflow values; quote anything unquoted; verify `shellcheck` (or manual review) reports no unquoted variable expansions in the workflow's `run` blocks
-- [ ] 5.2 Confirm no workflow job with access to privileged secrets executes untrusted code and that trigger scope is maintainer tag pushes only; record observed properties (SHA-pinned actions, per-job permissions, OIDC) as justification facts
+- [x] 5.1 Audit `.github/workflows/release.yml` for unquoted shell interpolations of `GITHUB_REF_NAME` and other workflow values; quote anything unquoted; verify `shellcheck` (or manual review) reports no unquoted variable expansions in the workflow's `run` blocks
+- [x] 5.2 Confirm no workflow job with access to privileged secrets executes untrusted code and that trigger scope is maintainer tag pushes only; record observed properties (SHA-pinned actions, per-job permissions, OIDC) as justification facts
 
 ## 6. GitHub repository settings (OSPS-AC-01.01, AC-02.01, AC-03.01/03.02, BR-07.01)
 
