@@ -3,49 +3,32 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: daily
+      interval: weekly
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: gomod
     directory: /
     schedule:
-      interval: daily
+      interval: weekly
+    groups:
+      go-minor-and-patch:
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: npm
     directory: /npm
     schedule:
-      interval: daily
-
-  - package-ecosystem: npm
-    directory: /npm/packages/darwin-arm64
-    schedule:
-      interval: daily
-
-  - package-ecosystem: npm
-    directory: /npm/packages/darwin-x64
-    schedule:
-      interval: daily
-
-  - package-ecosystem: npm
-    directory: /npm/packages/linux-arm64
-    schedule:
-      interval: daily
-
-  - package-ecosystem: npm
-    directory: /npm/packages/linux-x64
-    schedule:
-      interval: daily
-
-  - package-ecosystem: npm
-    directory: /npm/packages/win32-arm64
-    schedule:
-      interval: daily
-
-  - package-ecosystem: npm
-    directory: /npm/packages/win32-x64
-    schedule:
-      interval: daily
-
-  - package-ecosystem: npm
-    directory: /testdata/e2e-blog
-    schedule:
-      interval: daily
+      interval: weekly
+    ignore:
+      # Platform stub versions are rewritten by the release script (npm-release.mjs)
+      - dependency-name: "@amagyar/astrogui-*"
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - minor
+          - patch
