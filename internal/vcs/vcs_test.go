@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -208,6 +209,12 @@ func TestStatusIsReadOnlyAndReportsStagedAndUntrackedPaths(t *testing.T) {
 		t.Fatalf("git add: %v\n%s", err, out)
 	}
 	untrackedName := "newline\nname.md"
+	if runtime.GOOS == "windows" {
+		// Newlines are not legal in Windows filenames; the parser edge they
+		// exercise is covered by TestParsePorcelainZHandlesSpacesAndRenames
+		// above, in memory.
+		untrackedName = "untracked-name.md"
+	}
 	if err := os.WriteFile(filepath.Join(repo, untrackedName), []byte("new"), 0o644); err != nil {
 		t.Fatal(err)
 	}

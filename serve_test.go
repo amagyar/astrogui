@@ -55,6 +55,7 @@ func TestRememberSelectionPersistsOnlyNewOrRepairedChoices(t *testing.T) {
 	otherConfig := t.TempDir()
 	t.Setenv("HOME", otherConfig)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(otherConfig, ".config"))
+	t.Setenv("AppData", filepath.Join(otherConfig, "AppData")) // os.UserConfigDir reads %AppData% on Windows
 	if err := rememberSelection(config.File{}, root, "blog", true, "blog"); err != nil {
 		t.Fatal(err)
 	}

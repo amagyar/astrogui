@@ -160,6 +160,9 @@ func (w *Watcher) handle(ev fsnotify.Event) {
 }
 
 // record keeps the strongest op per path for the current debounce window.
+// A single os.WriteFile is an open followed by a write: fsnotify reports
+// CREATE then WRITE for it, and both land in one window, so a weaker later
+// op must never downgrade an earlier stronger one.
 func (w *Watcher) record(path string, op Op) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -169,8 +172,27 @@ func (w *Watcher) record(path string, op Op) {
 	prev, ok := w.pending[path]
 	if ok && prev == Delete && (op == Modify || op == Create) {
 		op = Create // something replaced a deleted path
+	} else if ok && opRank(prev) > opRank(op) {
+		op = prev
 	}
 	w.pending[path] = op
+}
+
+// opRank orders ops by how much they tell consumers: a removal beats
+// everything, a rename (path gone from the old name) beats a create, and a
+// create beats a plain modify. The delete-then-replace case is handled
+// separately in record.
+func opRank(op Op) int {
+	switch op {
+	case Delete:
+		return 3
+	case Rename:
+		return 2
+	case Create:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func (w *Watcher) flush() {

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -228,8 +229,10 @@ var (
 
 // resolveFrom resolves a config-file base path against the project root.
 func resolveFrom(root, base string) string {
-	if filepath.IsAbs(base) {
-		return filepath.Clean(base)
+	// Forward-slash absolutes from the config are intent, not relative dirs
+	// (filepath.IsAbs alone is false for "/srv/content" on Windows).
+	if path.IsAbs(base) || filepath.IsAbs(base) {
+		return filepath.Clean(filepath.FromSlash(base))
 	}
 	return filepath.Join(root, filepath.FromSlash(base))
 }
