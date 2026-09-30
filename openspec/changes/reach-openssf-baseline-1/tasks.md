@@ -2,10 +2,10 @@
 
 ## 1. License (OSPS-LE-02.01/02.02/03.01/03.02)
 
-- [ ] 1.1 Add MIT `LICENSE` file at repository root with copyright line "Allain Magyar"; verify `head LICENSE` shows MIT text and matches the license declared in `npm/package.json` and `.goreleaser.yml`
-- [ ] 1.2 Pin `LICENSE` explicitly in `.goreleaser.yml` `archives.files` so it cannot regress with tool upgrades; verify with `goreleaser check` (or `goreleaser release --snapshot --clean` into a scratch dist) that archives contain `LICENSE`
-- [ ] 1.3 Extend the npm staging path (`scripts/npm-release.mjs`) so each staged npm tarball includes the license file; verify by inspecting the staged tarballs (`tar -tf`) from a dry-run stage
-- [ ] 1.4 Add a verification step to `.github/workflows/release.yml` that fails before publication if any staged artifact (archives, npm tarballs, checksums inputs) lacks `LICENSE`; verify by triggering the check against a snapshot build
+- [x] 1.1 Add MIT `LICENSE` file at repository root with copyright line "Allain Magyar"; verify `head LICENSE` shows MIT text and matches the license declared in `npm/package.json` and `.goreleaser.yml`
+- [x] 1.2 Pin `LICENSE` explicitly in `.goreleaser.yml` `archives.files` so it cannot regress with tool upgrades; verify with `goreleaser check` (or `goreleaser release --snapshot --clean` into a scratch dist) that archives contain `LICENSE`
+- [x] 1.3 Extend the npm staging path (`scripts/npm-release.mjs`) so each staged npm tarball includes the license file; verify by inspecting the staged tarballs (`tar -tf`) from a dry-run stage
+- [x] 1.4 Add a verification step to `.github/workflows/release.yml` that fails before publication if any staged artifact (archives, npm tarballs, checksums inputs) lacks `LICENSE`; verify by triggering the check against a snapshot build
 
 ## 2. Security contact (OSPS-VM-02.01)
 
