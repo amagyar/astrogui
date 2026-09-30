@@ -214,7 +214,11 @@ function verifyTarballs(packed, version) {
 function npmViewShasum(name, version) {
   try {
     const out = run("npm", ["view", `${name}@${version}`, "dist.shasum", "--json"]);
-    return JSON.parse(out || "null");
+    const parsed = JSON.parse(out || "null");
+    // npm >= 12 returns an array for this query even when the version spec
+    // matches exactly; npm 11 returns a scalar. Normalize both.
+    const value = Array.isArray(parsed) ? parsed[0] : parsed;
+    return typeof value === "string" && value ? value : null;
   } catch {
     return null; // not published (E404) or registry unreachable; publish decides below
   }
@@ -250,7 +254,7 @@ function publish(version, tarballsDir) {
         continue;
       }
       die(
-        `${name}@${version} is already published with different content (registry ${published}, ours ${pkg.sha1}); ` +
+        `${name}@${version} is already published with different content (registry ${JSON.stringify(published)}, ours ${JSON.stringify(pkg.sha1)}); ` +
           "npm versions are immutable — publish a corrected release version instead",
       );
     }
