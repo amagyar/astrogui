@@ -79,8 +79,9 @@ the tap — never to the npm job.
    (`.sigstore.json` bundles), attests build provenance, publishes the GitHub
    release, and commits the updated Cask to the tap.
 4. `npm` — downloads the exact release archives, verifies the checksums,
-   stages and validates all seven package tarballs
-   (`scripts/npm-release.mjs stage`), then publishes the six platform
+   stages and validates all seven package tarballs — LICENSE, README, and the
+   binary in every one (`scripts/npm-release.mjs stage`) —
+   then publishes the six platform
    packages before the launcher (`scripts/npm-release.mjs publish`), all via
    OIDC.
 

@@ -2,6 +2,10 @@
 /astrogui
 /npm/bin/
 /npm/packages/*/bin/
+/npm/LICENSE
+/npm/README.md
+/npm/packages/*/LICENSE
+/npm/packages/*/README.md
 dist/
 .astro/
 testdata/e2e-blog/drafts/
