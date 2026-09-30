@@ -18,8 +18,8 @@
 
 ## 4. Version control hygiene (OSPS-QA-02.01, QA-04.01, QA-05.01/05.02)
 
-- [ ] 4.1 Run a one-time history audit: `git log --all --diff-filter=A --name-only` plus a magic-byte scan of history blobs for ELF (`\x7fELF`), Mach-O (`\xcf\xfa\xed\xfe`, `\xfe\xed\xfa\xcf`), and PE (`MZ`) signatures; verify no generated executable or unreviewable binary was ever tracked and record the result for the badge justification
-- [ ] 4.2 Confirm `go.mod` direct-require list and `npm/package.json` dependencies are current (`go mod tidy` produces no diff; `npm/package.json` lists the launcher's runtime needs); verify manifests answer OSPS-QA-02.01 factually
+- [x] 4.1 Run a one-time history audit: `git log --all --diff-filter=A --name-only` plus a magic-byte scan of history blobs for ELF (`\x7fELF`), Mach-O (`\xcf\xfa\xed\xfe`, `\xfe\xed\xfa\xcf`), and PE (`MZ`) signatures; verify no generated executable or unreviewable binary was ever tracked and record the result for the badge justification
+- [x] 4.2 Confirm `go.mod` direct-require list and `npm/package.json` dependencies are current (`go mod tidy` produces no diff; `npm/package.json` lists the launcher's runtime needs); verify manifests answer OSPS-QA-02.01 factually
 
 ## 5. Release workflow hardening pass (OSPS-BR-01.01, BR-01.03, BR-07.01 evidence)
 
