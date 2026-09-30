@@ -3,6 +3,10 @@
   "version": "0.0.0",
   "description": "The astrogui binary for x64 on darwin. Stub package; release publishing replaces it with the real binary.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amagyar/astrogui.git"
+  },
   "os": ["darwin"],
   "cpu": ["x64"],
   "files": ["bin"]

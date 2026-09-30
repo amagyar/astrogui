@@ -8,7 +8,8 @@
 // tag (v<version>), extracts the matching prebuilt binary from the GoReleaser
 // archives into each platform package (no postinstall script), packs every
 // package with `npm pack`, and validates the tarballs: contents, executable
-// bit, and platform metadata. It records what it packed in <out>/manifest.json.
+// bit, platform metadata, and the repository URL npm provenance verification
+// requires. It records what it packed in <out>/manifest.json.
 //
 // publish sends the six platform packages first, then the @amagyar/astrogui
 // launcher, so the launcher never references unpublished versions. A rerun
@@ -31,6 +32,11 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const npmDir = path.join(repoRoot, "npm");
 
 const LAUNCHER = "@amagyar/astrogui";
+
+// npm provenance verification (mandatory under OIDC trusted publishing) rejects
+// a publish whose manifest repository.url does not match the workflow's repo.
+const REPOSITORY_URL = "https://github.com/amagyar/astrogui";
+const normalizeRepositoryUrl = (url) => (url || "").replace(/^git\+/, "").replace(/\.git$/, "");
 
 // npm platform/arch names and the GoReleaser goos/goarch they pair with.
 const TARGETS = [
@@ -183,6 +189,13 @@ function verifyTarballs(packed, version) {
     if (meta.name !== name) die(`${tgz} contains package ${meta.name}, expected ${name}`);
     if (meta.version !== version) die(`${tgz} contains version ${meta.version}, expected ${version}`);
     if (meta.scripts) die(`${name} tarball declares lifecycle scripts; there must be no postinstall`);
+    if (normalizeRepositoryUrl(meta.repository?.url) !== REPOSITORY_URL) {
+      die(
+        `${name} tarball repository.url is ${JSON.stringify(meta.repository?.url ?? "")}, ` +
+          `expected to normalize to ${REPOSITORY_URL}; ` +
+          "npm rejects the publish at provenance verification otherwise",
+      );
+    }
     if (t) {
       if (JSON.stringify(meta.os) !== JSON.stringify([t.platform]) || JSON.stringify(meta.cpu) !== JSON.stringify([t.arch])) {
         die(`${name} tarball declares os/cpu ${JSON.stringify(meta.os)}/${JSON.stringify(meta.cpu)}`);
