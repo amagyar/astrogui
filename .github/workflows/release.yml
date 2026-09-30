@@ -1,0 +1,113 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test
+        run: go test ./...
+
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - name: Check required secrets
+        env:
+          TAP: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: |
+          [ -n "$TAP" ] || { echo "::error::missing secret HOMEBREW_TAP_GITHUB_TOKEN (needed to publish the Homebrew Cask to amagyar/homebrew-tap)"; exit 1; }
+
+  goreleaser:
+    needs: [test, preflight]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub release and upload assets
+      id-token: write # OIDC for cosign keyless signing and provenance attestation
+      attestations: write # store the provenance attestation
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+      - name: Attest build provenance
+        id: attest
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/checksums.txt
+      - name: Attach provenance to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp "${{ steps.attest.outputs.bundle-path }}" dist/provenance.intoto.jsonl
+          gh release upload "$GITHUB_REF_NAME" dist/provenance.intoto.jsonl --clobber
+
+  npm:
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # download the release archives
+      id-token: write # OIDC for npm trusted publishing (no long-lived token)
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Upgrade npm CLI for trusted publishing
+        # trusted publishing needs npm >= 11.5.1; exact version pinned for reproducibility
+        run: npm install -g npm@12.0.1
+      - name: Download and verify the release archives
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "$GITHUB_REF_NAME" --dir dist --pattern 'astrogui_*' --pattern 'checksums.txt' --clobber
+          ls -l dist
+          (cd dist && sha256sum --check checksums.txt)
+      - name: Stage and validate all seven npm tarballs
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          node scripts/npm-release.mjs stage --version "$version" --dist dist
+      - name: Publish (platform packages before the launcher)
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          node scripts/npm-release.mjs publish --version "$version" --tarballs dist/npm

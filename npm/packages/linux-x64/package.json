@@ -1,8 +1,9 @@
 {
-  "name": "@astrogui/linux-x64",
+  "name": "@amagyar/astrogui-linux-x64",
   "version": "0.0.0",
   "description": "The astrogui binary for x64 on linux. Stub package; release publishing replaces it with the real binary.",
   "license": "MIT",
   "os": ["linux"],
-  "cpu": ["x64"]
+  "cpu": ["x64"],
+  "files": ["bin"]
 }

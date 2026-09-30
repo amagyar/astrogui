@@ -1,8 +1,9 @@
 {
-  "name": "@astrogui/win32-arm64",
+  "name": "@amagyar/astrogui-win32-arm64",
   "version": "0.0.0",
   "description": "The astrogui binary for arm64 on win32. Stub package; release publishing replaces it with the real binary.",
   "license": "MIT",
   "os": ["win32"],
-  "cpu": ["arm64"]
+  "cpu": ["arm64"],
+  "files": ["bin"]
 }

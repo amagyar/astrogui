@@ -1,6 +1,7 @@
 # Build artifacts
 /astrogui
 /npm/bin/
+/npm/packages/*/bin/
 dist/
 .astro/
 testdata/e2e-blog/drafts/

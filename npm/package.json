@@ -1,11 +1,11 @@
 {
-  "name": "astrogui",
+  "name": "@amagyar/astrogui",
   "version": "0.0.0",
   "description": "A local cockpit for an Astro blog: kanban board and markdown editor for drafts, publishing by directory move.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/astrogui/astrogui.git"
+    "url": "git+https://github.com/amagyar/astrogui.git"
   },
   "bin": {
     "astrogui": "index.js"
@@ -14,12 +14,12 @@
     "index.js"
   ],
   "optionalDependencies": {
-    "@astrogui/darwin-arm64": "0.0.0",
-    "@astrogui/darwin-x64": "0.0.0",
-    "@astrogui/linux-arm64": "0.0.0",
-    "@astrogui/linux-x64": "0.0.0",
-    "@astrogui/win32-arm64": "0.0.0",
-    "@astrogui/win32-x64": "0.0.0"
+    "@amagyar/astrogui-darwin-arm64": "0.0.0",
+    "@amagyar/astrogui-darwin-x64": "0.0.0",
+    "@amagyar/astrogui-linux-arm64": "0.0.0",
+    "@amagyar/astrogui-linux-x64": "0.0.0",
+    "@amagyar/astrogui-win32-arm64": "0.0.0",
+    "@amagyar/astrogui-win32-x64": "0.0.0"
   },
   "engines": {
     "node": ">=18"

@@ -1,0 +1,98 @@
+version: 2
+
+project_name: astrogui
+
+builds:
+  - id: astrogui
+    main: .
+    binary: astrogui
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: astrogui
+    # tar.gz everywhere (including windows) so npm packaging and the Homebrew
+    # Cask need only tar.
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+# Keyless cosign signing (Sigstore OIDC via the GitHub Actions token):
+# uploads <artifact>.sigstore.json (bundle with signature + certificate)
+# for every artifact, including checksums.txt. Requires the
+# sigstore/cosign-installer step and id-token: write in the release
+# workflow. cosign v3 requires --bundle; the old --output-signature /
+# --output-certificate flags are gone.
+signs:
+  - cmd: cosign
+    signature: "${artifact}.sigstore.json"
+    args:
+      - sign-blob
+      - --yes
+      - --bundle
+      - "${signature}"
+      - "${artifact}"
+    artifacts: all
+    output: true
+
+# The Cask installs the same signed, checksummed release archives the GitHub
+# release exposes, for all four Homebrew-supported platforms (macOS and Linux
+# on Intel and ARM). It lands in the tap's Casks/ directory (the default).
+# The post install hook mirrors the tap's dockupdate Cask: release binaries
+# are built on Linux CI and carry no Apple code signature, so macOS would
+# quarantine and kill them on first run without it.
+homebrew_casks:
+  - name: astrogui
+    repository:
+      owner: amagyar
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: https://github.com/amagyar/astrogui
+    description: "Local cockpit for an Astro blog: draft kanban board and markdown editor"
+    license: MIT
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/astrogui"]
+          end
+
+release:
+  github:
+    owner: amagyar
+    name: astrogui
+
+changelog:
+  groups:
+    - title: Features
+      regexp: '^.*?(feat|perf)(\(\w+\))?!?:.+'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\(\w+\))?!?:.+'
+      order: 1
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - '^docs'
+      - '^chore'
+      - '^test'
+      - '^ci'
+      - '^style'
+      - '^refactor'
+      - '^build'
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"

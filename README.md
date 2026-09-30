@@ -14,21 +14,29 @@ astrogui is a prebuilt Go binary distributed through npm. Installing never
 compiles anything on your machine:
 
 ```sh
-npm install -g astrogui
+npm install -g @amagyar/astrogui
 ```
 
 The npm package carries a small JavaScript shim plus per-platform optional
-packages (`@astrogui/darwin-arm64`, `@astrogui/linux-x64`, …), so the same
-install works on macOS, Linux, and Windows, on amd64 and arm64. You can also
-run it once without installing:
+packages (`@amagyar/astrogui-darwin-arm64`, `@amagyar/astrogui-linux-x64`, …),
+so the same install works on macOS, Linux, and Windows, on amd64 and arm64.
+You can also run it once without installing:
 
 ```sh
-npx astrogui
+npx @amagyar/astrogui
 ```
 
-If your platform has no prebuilt binary, the install reports that clearly
-instead of failing obscurely; you can point the shim at a binary you built
-yourself with the `ASTROGUI_BIN` environment variable.
+On macOS or Linux you can install the same release binaries from Homebrew
+instead:
+
+```sh
+brew install amagyar/tap/astrogui
+```
+
+Either way the command is `astrogui`. If your platform has no prebuilt
+binary, the install reports that clearly instead of failing obscurely; you
+can point the shim at a binary you built yourself with the `ASTROGUI_BIN`
+environment variable.
 
 ## Use
 
@@ -163,9 +171,18 @@ go test ./...      # run the test suite
 go run . --help    # CLI help
 ```
 
-The npm package lives in [`npm/`](npm/); its shim execs the platform binary,
-falling back to a build at `npm/bin/astrogui` for local testing:
+The npm package lives in [`npm/`](npm/): the launcher is `@amagyar/astrogui`
+with six `@amagyar/astrogui-<platform>-<arch>` optional packages. The shim
+execs the matching platform binary, falling back to a build at
+`npm/bin/astrogui` for local testing:
 
 ```sh
 go build -o npm/bin/astrogui . && node npm/index.js version
+```
+
+The shim, the launcher manifest, and the six platform manifests are covered
+by the Node test suite:
+
+```sh
+node --test tests/
 ```
