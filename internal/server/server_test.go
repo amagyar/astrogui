@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -637,6 +638,11 @@ func TestGitStatusPreviewEndpoint(t *testing.T) {
 		t.Fatalf("git init: %v\n%s", err, out)
 	}
 	name := "new file\nname.md"
+	if runtime.GOOS == "windows" {
+		// Newlines are not legal in Windows filenames; use a plain name and
+		// keep the newline edge case to the in-memory parser tests.
+		name = "new file name.md"
+	}
 	if err := os.WriteFile(filepath.Join(f.base, name), []byte("content"), 0o644); err != nil {
 		t.Fatal(err)
 	}

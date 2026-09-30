@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 
 	"github.com/astrogui/astrogui/internal/cache"
@@ -353,14 +352,14 @@ func TestCrossDeviceMoveRefused(t *testing.T) {
 	before := hashTree(t, src)
 
 	m.rename = func(oldname, newname string) error {
-		return &os.LinkError{Op: "rename", Old: oldname, New: newname, Err: syscall.EXDEV}
+		return &os.LinkError{Op: "rename", Old: oldname, New: newname, Err: crossDeviceErrno()}
 	}
 	err := m.Move("cross-device-post", posts.StateIdeas, posts.StateWIP)
 	if !errors.Is(err, ErrCrossDevice) {
 		t.Fatalf("expected ErrCrossDevice, got %v", err)
 	}
 	msg := err.Error()
-	if !contains(msg, "drafts/ideas") || !contains(msg, "drafts/wip") {
+	if !contains(msg, filepath.Join("drafts", "ideas")) || !contains(msg, filepath.Join("drafts", "wip")) {
 		t.Errorf("refusal %q does not name both locations", msg)
 	}
 	if after := hashTree(t, src); !hashTreesEqual(after, before) {

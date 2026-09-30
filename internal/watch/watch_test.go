@@ -68,6 +68,25 @@ func TestPostCreatedOutsideToolProducesEvent(t *testing.T) {
 	}
 }
 
+// TestRecordKeepsCreateWhenWriteLandsInSameWindow pins the debounce
+// invariant behind TestModifyRenameDeleteEvents: os.WriteFile is one open
+// plus one write, so CREATE and WRITE for the same file routinely arrive in
+// one window. The flushed op must stay create.
+func TestRecordKeepsCreateWhenWriteLandsInSameWindow(t *testing.T) {
+	w := &Watcher{pending: map[string]Op{}}
+	w.record(filepath.Join("posts", "post.md"), Create)
+	w.record(filepath.Join("posts", "post.md"), Modify)
+	if got := w.pending[filepath.Join("posts", "post.md")]; got != Create {
+		t.Fatalf("pending op = %v, want %v", got, Create)
+	}
+	// Removal still wins over a stale create or modify.
+	w.record(filepath.Join("posts", "gone.md"), Create)
+	w.record(filepath.Join("posts", "gone.md"), Delete)
+	if got := w.pending[filepath.Join("posts", "gone.md")]; got != Delete {
+		t.Fatalf("pending op = %v, want %v", got, Delete)
+	}
+}
+
 // TestModifyRenameDeleteEvents verifies each change kind maps to its event.
 func TestModifyRenameDeleteEvents(t *testing.T) {
 	dir := t.TempDir()

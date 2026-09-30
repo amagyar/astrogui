@@ -73,7 +73,7 @@ func TestAbsentKeysFallBackToDefaults(t *testing.T) {
 	if p.EffectiveStaleness() != DefaultStaleness {
 		t.Errorf("Staleness = %v, want %v", p.EffectiveStaleness(), DefaultStaleness)
 	}
-	if got, want := p.IdeasPath("/blog"), "/blog/drafts/ideas"; got != want {
+	if got, want := p.IdeasPath("/blog"), filepath.FromSlash("/blog/drafts/ideas"); got != want {
 		t.Errorf("IdeasPath = %q, want %q", got, want)
 	}
 }
@@ -92,8 +92,8 @@ func TestPartialOverrideKeepsOtherDefaults(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 	p := reloaded.For("/blog")
-	if p.ContentPath("/blog") != "/blog/src/posts" {
-		t.Errorf("ContentPath = %q, want /blog/src/posts", p.ContentPath("/blog"))
+	if got, want := p.ContentPath("/blog"), filepath.FromSlash("/blog/src/posts"); got != want {
+		t.Errorf("ContentPath = %q, want %q", got, want)
 	}
 	if p.IdeasDir != "drafts/ideas" || p.WipDir != "drafts/wip" {
 		t.Errorf("unexpected defaults disturbed: %+v", p)

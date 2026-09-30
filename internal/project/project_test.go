@@ -203,7 +203,7 @@ func TestUserOverrideTakesPrecedence(t *testing.T) {
 
 	// Absolute override, no detection at all.
 	solo := Managed(root, "/srv/content", Collection{})
-	if solo.Dir != "/srv/content" || solo.Name != "content" {
+	if solo.Dir != filepath.FromSlash("/srv/content") || solo.Name != "content" {
 		t.Errorf("absolute override: got %+v", solo)
 	}
 

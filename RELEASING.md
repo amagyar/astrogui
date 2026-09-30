@@ -45,7 +45,7 @@ Notes:
   first version once with a short-lived granular token and configure the
   trusted publisher immediately after. Every later release uses OIDC only.
 - npm requires the workflow's `id-token: write` permission, npm CLI ≥ 11.5.1
-  and Node ≥ 22.14 — the workflow pins `npm@12.0.1` on Node 24.
+  and Node ≥ 22.14 — the workflow pins `npm@12.0.1` on Node 26.
 - npm checks that `repository.url` in each manifest matches the repository;
   all seven manifests declare `git+https://github.com/amagyar/astrogui.git`.
 - Workflow filename must be exactly `release.yml` (filename only, no path).
@@ -99,6 +99,6 @@ the tap — never to the npm job.
 goreleaser check
 goreleaser release --snapshot --clean --skip=sign   # dist/ archives + checksums
 node scripts/npm-release.mjs stage --version <v> --dist dist --out dist/npm
-node --test tests/                                  # shim + manifest checks
+node --test "tests/**/*.test.mjs"                   # shim + manifest checks
 actionlint .github/workflows/release.yml
 ```

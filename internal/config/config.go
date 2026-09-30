@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"time"
 )
@@ -65,8 +66,11 @@ func (p Project) EffectiveStaleness() time.Duration {
 // ResolveDir resolves a configured directory against the project root,
 // treating absolute paths as already resolved.
 func ResolveDir(root, dir string) string {
-	if filepath.IsAbs(dir) {
-		return filepath.Clean(dir)
+	// Config files may carry forward-slash absolute paths; on Windows those
+	// are not filepath.IsAbs, but they are unambiguous user intent, never a
+	// project-relative dir.
+	if path.IsAbs(dir) || filepath.IsAbs(dir) {
+		return filepath.Clean(filepath.FromSlash(dir))
 	}
 	return filepath.Join(root, dir)
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -15,6 +16,9 @@ func TestVersionStampedAtBuildTime(t *testing.T) {
 		t.Skip("requires the go toolchain to build a binary")
 	}
 	bin := filepath.Join(t.TempDir(), "astrogui-test")
+	if runtime.GOOS == "windows" {
+		bin += ".exe" // CreateProcess cannot run extension-less binaries
+	}
 	const want = "9.9.9-test"
 
 	build := exec.Command("go", "build", "-ldflags", "-X main.version="+want, "-o", bin, ".")
