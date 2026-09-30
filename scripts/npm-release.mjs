@@ -6,10 +6,11 @@
 //
 // stage derives the version for all seven package manifests from the release
 // tag (v<version>), extracts the matching prebuilt binary from the GoReleaser
-// archives into each platform package (no postinstall script), packs every
-// package with `npm pack`, and validates the tarballs: contents, executable
-// bit, platform metadata, and the repository URL npm provenance verification
-// requires. It records what it packed in <out>/manifest.json.
+// archives into each platform package (no postinstall script), places the
+// LICENSE and README every tarball must ship, packs every package with
+// `npm pack`, and validates the tarballs: contents, executable bit, platform
+// metadata, and the repository URL npm provenance verification requires. It
+// records what it packed in <out>/manifest.json.
 //
 // publish sends the six platform packages first, then the @amagyar/astrogui
 // launcher, so the launcher never references unpublished versions. A rerun
@@ -143,6 +144,43 @@ function placeLicense() {
   console.log("- copied LICENSE into all seven package directories");
 }
 
+// Human-readable names for the platform stub READMEs.
+const HUMAN_TARGET = {
+  "darwin-arm64": "macOS on Apple silicon (arm64)",
+  "darwin-x64": "macOS on Intel (x64)",
+  "linux-arm64": "Linux on ARM64",
+  "linux-x64": "Linux on x86-64",
+  "win32-arm64": "Windows on ARM64",
+  "win32-x64": "Windows on x86-64",
+};
+
+function placeReadmes() {
+  const readme = path.join(repoRoot, "README.md");
+  if (!fs.existsSync(readme)) die("missing README.md at repository root");
+  // Same single-source pattern as LICENSE: npmjs.com renders the README from
+  // the tarball, so the launcher ships the project README while each platform
+  // package gets a stub pointing users at the launcher.
+  fs.copyFileSync(readme, path.join(npmDir, "README.md"));
+  for (const t of TARGETS) {
+    const human = HUMAN_TARGET[`${t.platform}-${t.arch}`];
+    fs.writeFileSync(
+      path.join(platformDir(t), "README.md"),
+      `# ${platformPkg(t)}\n` +
+        `\n` +
+        `The prebuilt [astrogui](https://www.npmjs.com/package/@amagyar/astrogui) binary for ${human}.\n` +
+        `\n` +
+        `This is an internal platform package: the \`@amagyar/astrogui\` launcher selects and loads it automatically via \`optionalDependencies\` — do not install it directly.\n` +
+        `\n` +
+        `\`\`\`sh\n` +
+        `npm install -g @amagyar/astrogui\n` +
+        `\`\`\`\n` +
+        `\n` +
+        `MIT — see [LICENSE](./LICENSE). Source: https://github.com/amagyar/astrogui\n`,
+    );
+  }
+  console.log("- placed READMEs in all seven package directories");
+}
+
 function placeBinaries(distDir, version) {
   for (const t of TARGETS) {
     const binDir = path.join(platformDir(t), "bin");
@@ -174,7 +212,7 @@ function verifyTarballs(packed, version) {
   for (const { target: t, dir, tgz } of packed) {
     const name = t ? platformPkg(t) : LAUNCHER;
     const entries = run("tar", ["-tzf", tgz]).trim().split("\n").sort();
-    const expected = ["package/package.json", "package/LICENSE", t ? `package/bin/${binaryName(t)}` : "package/index.js"];
+    const expected = ["package/package.json", "package/LICENSE", "package/README.md", t ? `package/bin/${binaryName(t)}` : "package/index.js"];
     for (const entry of expected) {
       if (!entries.includes(entry)) die(`${name} tarball is missing ${entry} (has: ${entries.join(", ")})`);
     }
@@ -293,6 +331,7 @@ function main() {
     verifyArchives(distDir, version);
     stampVersions(version);
     placeLicense();
+    placeReadmes();
     placeBinaries(distDir, version);
     const packed = packAll(outDir);
     const packages = verifyTarballs(packed, version);
