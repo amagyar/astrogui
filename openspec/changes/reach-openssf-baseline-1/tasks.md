@@ -13,8 +13,8 @@
 
 ## 3. User documentation (OSPS-DO-01.01)
 
-- [ ] 3.1 Review `README.md` against the spec scenario (install, run inside an Astro project, board/editor/publish usage) and close gaps: document the collection-selection prompt and add a visible warning on the publish step since it moves content directories; verify a fresh read-through lets a new user install and run without other sources
-- [ ] 3.2 Embed the baseline badge in `README.md` (`[![OpenSSF Baseline](https://www.bestpractices.dev/projects/15108/baseline)](https://www.bestpractices.dev/projects/15108)`); verify the badge image renders on GitHub
+- [x] 3.1 Review `README.md` against the spec scenario (install, run inside an Astro project, board/editor/publish usage) and close gaps: document the collection-selection prompt and add a visible warning on the publish step since it moves content directories; verify a fresh read-through lets a new user install and run without other sources
+- [x] 3.2 Embed the baseline badge in `README.md` (`[![OpenSSF Baseline](https://www.bestpractices.dev/projects/15108/baseline)](https://www.bestpractices.dev/projects/15108)`); verify the badge image renders on GitHub
 
 ## 4. Version control hygiene (OSPS-QA-02.01, QA-04.01, QA-05.01/05.02)
 

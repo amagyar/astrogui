@@ -1,5 +1,7 @@
 # astrogui
 
+[![OpenSSF Baseline](https://www.bestpractices.dev/projects/15108/baseline)](https://www.bestpractices.dev/projects/15108)
+
 A local cockpit for an [Astro](https://astro.build) blog: a kanban board over
 your drafts, a split-pane markdown editor, and a publish step that moves a post
 into your content collection by a single atomic directory rename.
@@ -130,6 +132,12 @@ for pointer users.
 
 ## The publish gate
 
+> **Warning:** publishing is a move, not a copy. Publishing a post renames its
+> folder from the draft directory into your content collection — the folder
+> leaves `drafts/` and lands at `src/content/…`, immediately becoming part of
+> your next build. astrogui performs no git operation around it; version
+> control stays entirely yours.
+
 Moving a post into the content directory is the moment it enters your build,
 so astrogui checks it first. A failed check blocks the move and names the
 specific problem:
@@ -184,5 +192,10 @@ The shim, the launcher manifest, and the six platform manifests are covered
 by the Node test suite:
 
 ```sh
-node --test tests/
+node --test tests/*.test.mjs
 ```
+
+## License
+
+[MIT](LICENSE) — the same license ships inside every release archive and npm
+package. Security reports go to the [security policy](SECURITY.md).
