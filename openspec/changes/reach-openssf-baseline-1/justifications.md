@@ -3,6 +3,31 @@
 Facts recorded during apply, each checkable in the repository or its settings.
 These feed the badge-entry justifications drafted in task 7.1.
 
+## Badge-entry justification drafts (task 7.1)
+
+Controls already Met on the entry keep their existing justifications
+(AC-01.01, BR-03.01, BR-03.02, DO-02.01, GV-02.01, GV-03.01, QA-01.01,
+QA-01.02). The sixteen below are the new/changed entries.
+
+| Control | Status | Justification text |
+|---|---|---|
+| OSPS-AC-02.01 | Met | This is a personal repository with a single collaborator (the owner); GitHub personal repositories have no default-write access — collaborators are only ever added manually with an explicit permission choice, and none exist besides the owner. |
+| OSPS-AC-03.01 | Met | Branch protection on `main` requires a pull request before merging and is enforced for administrators; a direct-push probe commit was rejected by the repository rules. |
+| OSPS-AC-03.02 | Met | Branch protection on `main` blocks deletion (allow_deletions=false) and force pushes; verified via the branch-protection API read-back. |
+| OSPS-BR-01.01 | Met | The release workflow triggers only on maintainer-pushed `v*` tags; the only tag-derived value (`GITHUB_REF_NAME`) is expanded exclusively inside double quotes in every run block (shellcheck-clean), and downloaded release archives are SHA-256-verified against the published checksums before any derived value is used. |
+| OSPS-BR-01.03 | Met | No workflow job executing untrusted code exists: the tag-only trigger means only maintainer-tagged sources are ever checked out; every external action is pinned by full commit SHA, permissions are least-privilege per job (workflow default `contents: read`), npm publishing uses OIDC trusted publishing with no long-lived token, and step-security/harden-runner runs on every job. |
+| OSPS-BR-07.01 | Met | `.gitignore` excludes local build artifacts; secret scanning and push protection are enabled on the repository (verified via the API); a full-history audit of all 182 blobs found zero credentials ever committed. |
+| OSPS-DO-01.01 | Met | `README.md` is the user guide: it documents installation (npm/Homebrew), running inside an Astro project, board/editor/publish usage, configuration locations, and carries a visible warning that publishing moves the post folder into the content collection. |
+| OSPS-LE-02.01 | Met | The project is released under the MIT license (OSI-approved and FSF-free), declared in `npm/package.json` and `.goreleaser.yml`. |
+| OSPS-LE-02.02 | Met | Released binaries and packages are MIT licensed, matching the source; the Homebrew Cask declares `license: MIT` and the npm packages ship the MIT LICENSE file. |
+| OSPS-LE-03.01 | Met | The MIT license text is maintained in the repository's root `LICENSE` file. |
+| OSPS-LE-03.02 | Met | Every release archive includes `LICENSE` (pinned explicitly in `.goreleaser.yml` `archives.files`), every npm tarball contains `package/LICENSE` (copied at stage time and validated by the staging script), and a release-workflow gate re-checks both families before publication. Verified end-to-end against a snapshot build. |
+| OSPS-QA-02.01 | Met | Go dependencies are enumerated in `go.mod` (`go mod tidy` produces no diff); the npm launcher manifest declares its dependencies — zero runtime dependencies plus the six prebuilt platform packages as optionalDependencies. |
+| OSPS-QA-04.01 | N/A | astrogui is a single repository (github.com/amagyar/astrogui); there is no multi-repo list to document. |
+| OSPS-QA-05.01 | Met | A full-history audit (every blob on every ref, magic-byte scan for ELF/Mach-O/PE) found no generated executable artifact ever committed; the local development binary is git-ignored and untracked. |
+| OSPS-QA-05.02 | Met | The same full-history audit found no unreviewable binary artifacts; the only non-source files ever added are text test fixtures. |
+| OSPS-VM-02.01 | Met | `SECURITY.md` publishes the security contact channel (GitHub private vulnerability reporting, verified available), reporting guidance, and acknowledgement/coordinated-disclosure expectations. |
+
 ## Release workflow (OSPS-BR-01.01, BR-01.03) — .github/workflows/release.yml
 
 - Trigger scope: `on: push: tags: ['v*']` only. No `pull_request`,

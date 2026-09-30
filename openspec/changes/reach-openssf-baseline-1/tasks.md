@@ -34,6 +34,6 @@
 
 ## 7. Badge entry update (project 15108, all 24 controls)
 
-- [ ] 7.1 Draft the justification text for each control from the recorded facts of tasks 1-6 (one to two sentences each, citing checkable artifacts: file paths, workflow properties, settings); keep the drafts in the change notes for review
+- [x] 7.1 Draft the justification text for each control from the recorded facts of tasks 1-6 (one to two sentences each, citing checkable artifacts: file paths, workflow properties, settings); keep the drafts in the change notes for review
 - [ ] 7.2 Update the badge entry at bestpractices.dev project 15108: set OSPS-LE-02.01/02.02/03.01/03.02, VM-02.01, DO-01.01, QA-02.01, QA-04.01 (N/A), QA-05.01/05.02, AC-02.01, AC-03.01/03.02, BR-01.01, BR-01.03, BR-07.01 to Met or N/A with the drafted justifications; verify the page shows all 24 controls Met or N/A
 - [ ] 7.3 Final integration check: re-read the badge page against this change's `specs/openssf-baseline/spec.md` scenario-by-scenario and confirm every justification matches the actual repository state; note the percentage reached (target: 100% of Level 1 controls)
