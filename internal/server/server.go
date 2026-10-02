@@ -318,14 +318,38 @@ func (s *Server) findPost(name string) (*posts.Post, error) {
 	return s.app.Manager.Find(name)
 }
 
-func (s *Server) handleEntry(w http.ResponseWriter, r *http.Request) {
-	p, err := s.findPost(r.PathValue("post"))
+// findPostFor writes the lookup outcome and reports whether handling may
+// continue. A post that does not exist is 404; a post that exists but could
+// not be read is 500 naming the read failure — an internal error is never
+// disguised as absence.
+func (s *Server) findPostFor(w http.ResponseWriter, name string) (*posts.Post, bool) {
+	p, err := s.findPost(name)
 	if err != nil {
 		writeErr(w, 500, err)
-		return
+		return nil, false
 	}
 	if p == nil {
-		writeErr(w, 404, fmt.Errorf("no post %q", r.PathValue("post")))
+		writeErr(w, 404, fmt.Errorf("no post %q", name))
+		return nil, false
+	}
+	return p, true
+}
+
+// modTimeOrNull returns the file's modification time, or nil when it cannot
+// be read. A save that already succeeded is still successful; the fresh time
+// is a bonus, and a stat failure (the file removed or made unreadable the
+// instant after the write) must never panic the handler.
+func modTimeOrNull(path string) any {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil
+	}
+	return info.ModTime()
+}
+
+func (s *Server) handleEntry(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.findPostFor(w, r.PathValue("post"))
+	if !ok {
 		return
 	}
 	info, _ := os.Stat(p.File)
@@ -417,9 +441,8 @@ func (s *Server) handleSaveBody(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, fmt.Errorf("invalid request body: %w", err))
 		return
 	}
-	p, err := s.findPost(r.PathValue("post"))
-	if err != nil || p == nil {
-		writeErr(w, 404, fmt.Errorf("no post %q", r.PathValue("post")))
+	p, ok := s.findPostFor(w, r.PathValue("post"))
+	if !ok {
 		return
 	}
 	if p.Loose {
@@ -432,7 +455,7 @@ func (s *Server) handleSaveBody(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 403, err)
 		return
 	}
-	err = posts.SaveBodyGuarded(s.app.Guard, p.File, []byte(req.Body), req.ModTime)
+	err := posts.SaveBodyGuarded(s.app.Guard, p.File, []byte(req.Body), req.ModTime)
 	var conflict *posts.ConflictError
 	if errors.As(err, &conflict) {
 		writeJSON(w, 409, map[string]any{
@@ -446,8 +469,7 @@ func (s *Server) handleSaveBody(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
-	info, _ := os.Stat(p.File)
-	writeJSON(w, 200, map[string]any{"saved": true, "modTime": info.ModTime()})
+	writeJSON(w, 200, map[string]any{"saved": true, "modTime": modTimeOrNull(p.File)})
 }
 
 // handleSaveFrontmatter edits structured fields. Only fields that actually
@@ -461,9 +483,8 @@ func (s *Server) handleSaveFrontmatter(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, fmt.Errorf("invalid request body: %w", err))
 		return
 	}
-	p, err := s.findPost(r.PathValue("post"))
-	if err != nil || p == nil {
-		writeErr(w, 404, fmt.Errorf("no post %q", r.PathValue("post")))
+	p, ok := s.findPostFor(w, r.PathValue("post"))
+	if !ok {
 		return
 	}
 	if p.Loose {
@@ -478,8 +499,7 @@ func (s *Server) handleSaveFrontmatter(w http.ResponseWriter, r *http.Request) {
 	// Nothing changed: no rewrite at all.
 	changed := fmedit.Changed(p.Frontmatter(), req.Fields)
 	if len(changed) == 0 {
-		info, _ := os.Stat(p.File)
-		writeJSON(w, 200, map[string]any{"saved": false, "changed": false, "modTime": info.ModTime()})
+		writeJSON(w, 200, map[string]any{"saved": false, "changed": false, "modTime": modTimeOrNull(p.File)})
 		return
 	}
 
@@ -488,6 +508,7 @@ func (s *Server) handleSaveFrontmatter(w http.ResponseWriter, r *http.Request) {
 	if len(fm) == 0 {
 		fm = []byte("\n")
 	}
+	var err error
 	for field, value := range changed {
 		fm, err = fmedit.Update(fm, field, value)
 		if err != nil {
@@ -530,8 +551,7 @@ func (s *Server) handleSaveFrontmatter(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
-	info, _ := os.Stat(p.File)
-	writeJSON(w, 200, map[string]any{"saved": true, "changed": true, "modTime": info.ModTime()})
+	writeJSON(w, 200, map[string]any{"saved": true, "changed": true, "modTime": modTimeOrNull(p.File)})
 }
 
 // handleSaveRaw replaces the whole file from the raw view.
@@ -544,16 +564,15 @@ func (s *Server) handleSaveRaw(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, fmt.Errorf("invalid request body: %w", err))
 		return
 	}
-	p, err := s.findPost(r.PathValue("post"))
-	if err != nil || p == nil {
-		writeErr(w, 404, fmt.Errorf("no post %q", r.PathValue("post")))
+	p, ok := s.findPostFor(w, r.PathValue("post"))
+	if !ok {
 		return
 	}
 	if err := s.app.Guard.Check(p.File); err != nil {
 		writeErr(w, 403, err)
 		return
 	}
-	err = posts.WriteFileGuarded(s.app.Guard, p.File, []byte(req.Content), p.Bytes(), req.ModTime)
+	err := posts.WriteFileGuarded(s.app.Guard, p.File, []byte(req.Content), p.Bytes(), req.ModTime)
 	var conflict *posts.ConflictError
 	if errors.As(err, &conflict) {
 		writeJSON(w, 409, map[string]any{
@@ -567,8 +586,7 @@ func (s *Server) handleSaveRaw(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
-	info, _ := os.Stat(p.File)
-	writeJSON(w, 200, map[string]any{"saved": true, "modTime": info.ModTime()})
+	writeJSON(w, 200, map[string]any{"saved": true, "modTime": modTimeOrNull(p.File)})
 }
 
 func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
@@ -579,12 +597,11 @@ func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, fmt.Errorf("invalid request body: %w", err))
 		return
 	}
-	p, err := s.findPost(r.PathValue("post"))
-	if err != nil || p == nil {
-		writeErr(w, 404, fmt.Errorf("no post %q", r.PathValue("post")))
+	p, ok := s.findPostFor(w, r.PathValue("post"))
+	if !ok {
 		return
 	}
-	err = s.app.Manager.Move(p.Name, p.State, req.To)
+	err := s.app.Manager.Move(p.Name, p.State, req.To)
 	var checks *lifecycle.CheckFailure
 	if errors.As(err, &checks) {
 		writeJSON(w, 422, map[string]any{"error": err.Error(), "problems": checks.Problems})
@@ -676,9 +693,8 @@ func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, fmt.Errorf("invalid request body: %w", err))
 		return
 	}
-	p, err := s.findPost(r.PathValue("post"))
-	if err != nil || p == nil {
-		writeErr(w, 404, fmt.Errorf("no post %q", r.PathValue("post")))
+	p, ok := s.findPostFor(w, r.PathValue("post"))
+	if !ok {
 		return
 	}
 	if p.Loose {
@@ -730,15 +746,25 @@ func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, map[string]any{"name": final})
 }
 
-// handleAsset serves a post's own asset, confined by real path after symlink
-// resolution to the post's directory.
+// handleAsset serves a post's own asset, confined by resolved real path to
+// the post's directory. A loose file has no directory of its own and exposes
+// no asset namespace — refused, exactly as upload refuses it. Responses are
+// inert documents: even opened directly as a top-level page, an asset cannot
+// execute in the tool's origin.
 func (s *Server) handleAsset(w http.ResponseWriter, r *http.Request) {
-	p, err := s.findPost(r.PathValue("post"))
-	if err != nil || p == nil {
-		writeErr(w, 404, fmt.Errorf("no post %q", r.PathValue("post")))
+	p, ok := s.findPostFor(w, r.PathValue("post"))
+	if !ok {
+		return
+	}
+	if p.Loose {
+		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 	file := r.PathValue("file")
+
+	// An asset is bytes, never an active document in the tool's origin.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 
 	// Control 4: confinement by resolved real path against the post's own
 	// directory. The refusal discloses nothing about the path.

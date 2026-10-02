@@ -322,11 +322,13 @@
     // headers, so bytes are fetched and turned into object URLs.
     $("preview").querySelectorAll("img[data-src]").forEach(function (img) {
       var ref = img.getAttribute("data-src");
-      if (EditorState.isExternalImage(ref)) {
-        var external = document.createElement("span");
-        external.className = "external-image";
-        external.textContent = "External image not loaded: " + ref;
-        img.replaceWith(external);
+      var readOnly = !!(state.editorPost && state.editorPost.readOnly);
+      var blocked = EditorState.blockedImageReason(ref, readOnly);
+      if (blocked) {
+        var notice = document.createElement("span");
+        notice.className = "external-image";
+        notice.textContent = blocked;
+        img.replaceWith(notice);
         return;
       }
       var post = state.editorPost.name;

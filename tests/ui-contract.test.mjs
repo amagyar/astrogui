@@ -22,7 +22,15 @@ test("Git review and editor recovery have explicit action controls", () => {
 
 test("source input rerenders from the textarea rather than treating the event as text", () => {
   assert.match(app, /\$\("source"\)\.addEventListener\("input", function \(\) \{ updatePreview\(\); \}\)/);
-  assert.match(app, /External image not loaded:/);
+});
+
+test("preview hydration asks editor-state which images are blocked instead of fetching them", () => {
+  // The wiring: every data-src image is checked through blockedImageReason,
+  // so loose (read-only) posts never request local images the server refuses.
+  assert.match(app, /EditorState\.blockedImageReason\(ref, readOnly\)/);
+  const editorState = readFileSync(new URL("../internal/server/web/editor-state.js", import.meta.url), "utf8");
+  assert.match(editorState, /External image not loaded: /);
+  assert.match(editorState, /loose posts hold no assets of their own/);
 });
 
 test("narrow viewports reflow both board and editor panes", () => {

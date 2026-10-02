@@ -43,7 +43,7 @@ The tool SHALL require proof that a request originates from the tool's own inter
 
 ### Requirement: Requests are confined to the project
 
-The tool SHALL restrict filesystem access to the project it is managing, SHALL restrict writes to the managed directories, and SHALL confine access to a specific post's directory when serving that post's assets. Containment checks SHALL reject symlink escapes, including dangling symlinks that could be followed by a write.
+The tool SHALL restrict filesystem access to the project it is managing, SHALL restrict writes to the managed directories, and SHALL confine access to a specific post's directory when serving that post's assets. A post that has no directory of its own exposes no asset namespace at all. Containment checks SHALL reject symlink escapes, including dangling symlinks that could be followed by a write.
 
 #### Scenario: Request escaping the project
 
@@ -60,6 +60,16 @@ The tool SHALL restrict filesystem access to the project it is managing, SHALL r
 
 - **WHEN** a request names an image inside the post's own directory
 - **THEN** the tool serves that image
+
+#### Scenario: Asset requests for a loose file are refused
+
+- **WHEN** a request names an asset of a loose post (a bare markdown file, which has no directory of its own)
+- **THEN** the tool refuses the request, exactly as asset upload refuses loose posts
+
+#### Scenario: Served assets are inert documents
+
+- **WHEN** an asset response is opened directly as a top-level document
+- **THEN** response headers prevent it from executing script or embedding active content in the tool's origin, and from being sniffed into a different type
 
 #### Scenario: Upload through a dangling symlink
 
@@ -117,3 +127,22 @@ The tool SHALL be installable as a prebuilt binary through a global install of t
 
 - **WHEN** the tool is started in a directory that is not an Astro project
 - **THEN** it reports that no project was found and exits without modifying anything
+
+### Requirement: Entry lookup errors are reported honestly
+
+The API SHALL distinguish a post that does not exist from a post that exists but cannot be read, and SHALL NOT report an internal failure as a missing post.
+
+#### Scenario: Post is absent
+
+- **WHEN** a request names a post that is in no managed state
+- **THEN** the API reports the post as not found
+
+#### Scenario: Post exists but cannot be read
+
+- **WHEN** a request names an existing post whose file cannot be read
+- **THEN** the API reports a server error naming the read failure, not a not-found error
+
+#### Scenario: Stat failure after a successful save
+
+- **WHEN** a save succeeds but the fresh modification time cannot be read afterward
+- **THEN** the save is still reported as successful, with the modification time unknown, and no handler panics

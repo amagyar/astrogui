@@ -34,5 +34,15 @@
     return /^(https?:)?\/\//i.test(String(ref || ""));
   }
 
-  return { changed: changed, dirty: dirty, savePlan: savePlan, isExternalImage: isExternalImage };
+  // blockedImageReason reports why an image reference must not be fetched
+  // for the preview, or null when it may be hydrated through the asset API:
+  // external references are never requested, and a loose (read-only) post
+  // holds no assets of its own to fetch.
+  function blockedImageReason(ref, readOnly) {
+    if (isExternalImage(ref)) return "External image not loaded: " + ref;
+    if (readOnly) return "Image not loaded: loose posts hold no assets of their own: " + ref;
+    return null;
+  }
+
+  return { changed: changed, dirty: dirty, savePlan: savePlan, isExternalImage: isExternalImage, blockedImageReason: blockedImageReason };
 });

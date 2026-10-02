@@ -698,3 +698,100 @@ func statMod(t *testing.T, path string) time.Time {
 	}
 	return info.ModTime()
 }
+
+// TestModTimeOrNullSurvivesMissingFile is the regression for the post-save
+// stat: a file removed or made unreadable the instant after a successful
+// write must yield a null time, never a nil-dereference panic.
+func TestModTimeOrNullSurvivesMissingFile(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("modTimeOrNull panicked: %v", r)
+		}
+	}()
+	if got := modTimeOrNull(filepath.Join(t.TempDir(), "gone.md")); got != nil {
+		t.Errorf("missing file modTime = %v, want nil", got)
+	}
+	live := filepath.Join(t.TempDir(), "live.md")
+	if err := os.WriteFile(live, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if modTimeOrNull(live) == nil {
+		t.Error("existing file modTime = nil, want the modification time")
+	}
+}
+
+// TestEntryLookupErrorsAreHonest verifies a post that does not exist is 404
+// while a post that exists but cannot be read is a 500 naming the read
+// failure — an internal error is never disguised as absence.
+func TestEntryLookupErrorsAreHonest(t *testing.T) {
+	f := newFixture(t)
+
+	// Absent post: not found.
+	res, body := f.do("GET", "/api/collections/blog/entries/no-such-post", nil)
+	if res.StatusCode != 404 {
+		t.Fatalf("absent post = %d %v, want 404", res.StatusCode, body)
+	}
+
+	if runtime.GOOS == "windows" {
+		t.Skip("permission-based unreadability is not available on windows")
+	}
+	// Existing post whose file cannot be read: server error naming the read.
+	name := f.createIdea("unreadable idea")
+	index := filepath.Join(f.base, "drafts", "ideas", name, "index.md")
+	if err := os.Chmod(index, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(index, 0o644) })
+	res, body = f.do("GET", "/api/collections/blog/entries/"+name, nil)
+	if res.StatusCode != 500 {
+		t.Fatalf("unreadable post = %d %v, want 500", res.StatusCode, body)
+	}
+	if errText := fmt.Sprint(body["error"]); !strings.Contains(errText, "reading") {
+		t.Errorf("500 does not name the read failure: %v", errText)
+	}
+}
+
+// TestLoosePostExposesNoAssetNamespace verifies a loose file — a bare
+// markdown file with no directory of its own — cannot serve files from the
+// collection directory through its asset path, mirroring the upload refusal.
+func TestLoosePostExposesNoAssetNamespace(t *testing.T) {
+	f := newFixture(t)
+	content := filepath.Join(f.base, "src", "content", "blog")
+	if err := os.WriteFile(filepath.Join(content, "loose.md"), []byte("---\ntitle: Loose\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A real file in the collection directory, outside any post's folder.
+	if err := os.WriteFile(filepath.Join(content, "neighbor.png"), []byte("PNGDATA"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, body := f.do("GET", "/api/collections/blog/entries/loose/assets/neighbor.png", nil)
+	if res.StatusCode != 404 {
+		t.Fatalf("loose-post asset request = %d %v, want 404", res.StatusCode, body)
+	}
+}
+
+// TestAssetResponsesAreInert verifies an asset served as a top-level
+// document cannot execute in the tool's origin: sandbox policy and no type
+// sniffing on every asset response.
+func TestAssetResponsesAreInert(t *testing.T) {
+	f := newFixture(t)
+	name := f.createIdea("an idea with a diagram")
+	postDir := filepath.Join(f.base, "drafts", "ideas", name)
+	svg := `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`
+	if err := os.WriteFile(filepath.Join(postDir, "diagram.svg"), []byte(svg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, body := f.do("GET", "/api/collections/blog/entries/"+name+"/assets/diagram.svg", nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("svg asset = %d %v, want 200", res.StatusCode, body)
+	}
+	if got := res.Header.Get("Content-Security-Policy"); got != "default-src 'none'" {
+		t.Errorf("Content-Security-Policy = %q, want default-src 'none'", got)
+	}
+	if got := res.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+	if got := res.Header.Get("Content-Type"); got != "image/svg+xml" {
+		t.Errorf("Content-Type = %q, want image/svg+xml", got)
+	}
+}
