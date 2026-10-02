@@ -425,3 +425,63 @@ func contains(s, sub string) bool {
 		return false
 	})()
 }
+
+// TestMdxFolderPostFindsMovesAndPublishes verifies an index.mdx folder post
+// is a first-class managed post: found by name, moved between states, and
+// gated by the publish pre-flight like an index.md folder.
+func TestMdxFolderPostFindsMovesAndPublishes(t *testing.T) {
+	m, base := newManager(t)
+	postDir := filepath.Join(base, "drafts", "ideas", "mdx-idea")
+	if err := os.MkdirAll(postDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\ntitle: An MDX idea\nslug: mdx-idea\ndate: 2026-01-01\n---\n\nBody with substance.\n"
+	if err := os.WriteFile(filepath.Join(postDir, "index.mdx"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p, err := m.Find("mdx-idea")
+	if err != nil {
+		t.Fatalf("find: %v", err)
+	}
+	if p == nil {
+		t.Fatal("index.mdx folder post not found")
+	}
+	if p.Loose {
+		t.Error("index.mdx folder post found as loose")
+	}
+
+	if err := m.Move("mdx-idea", posts.StateIdeas, posts.StateWIP); err != nil {
+		t.Fatalf("move ideas->wip: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(base, "drafts", "wip", "mdx-idea", "index.mdx")); err != nil {
+		t.Fatalf("post not in wip as index.mdx: %v", err)
+	}
+
+	// The publish gate reads the entry file whichever form it takes.
+	if err := m.Move("mdx-idea", posts.StateWIP, posts.StatePublished); err != nil {
+		t.Fatalf("publish (gate): %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(base, "src", "content", "blog", "mdx-idea", "index.mdx")); err != nil {
+		t.Fatalf("post not published as index.mdx: %v", err)
+	}
+}
+
+// TestSlugifyKeepsUnicodeLetters verifies names derive from the title's
+// letters and numbers in any script, ASCII behavior is unchanged, and a
+// title with nothing usable falls back to the placeholder.
+func TestSlugifyKeepsUnicodeLetters(t *testing.T) {
+	cases := map[string]string{
+		"こんにちは世界":             "こんにちは世界",
+		"Hello 世界!":           "hello-世界",
+		"My  Great -- Idea!!": "my-great-idea",
+		"Café Chronicles":     "café-chronicles",
+		"!!! ??? ***":         "untitled",
+		"Быстрая идея":        "быстрая-идея",
+	}
+	for in, want := range cases {
+		if got := Slugify(in); got != want {
+			t.Errorf("Slugify(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

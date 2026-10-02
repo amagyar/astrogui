@@ -68,8 +68,8 @@ directory using the `glob()` loader.
 
 ## The on-disk convention
 
-The board is three directories. Every post is a **folder** holding `index.md`
-plus the post's own images:
+The board is three directories. Every post is a **folder** holding its entry
+file (`index.md`, or `index.mdx` for MDX posts) plus the post's own images:
 
 ```
 drafts/ideas/my-post/index.md      captured, not yet written

@@ -795,3 +795,26 @@ func TestAssetResponsesAreInert(t *testing.T) {
 		t.Errorf("Content-Type = %q, want image/svg+xml", got)
 	}
 }
+
+// TestUnicodeTitlePinsSlugEndToEnd verifies a post created from a non-ASCII
+// title gets a folder name carrying the title's letters and a slug pinned to
+// that name, so the published URL depends only on the post's identity.
+func TestUnicodeTitlePinsSlugEndToEnd(t *testing.T) {
+	f := newFixture(t)
+	res, body := f.do("POST", "/api/collections/blog/entries", map[string]any{"title": "こんにちは世界"})
+	if res.StatusCode != 201 {
+		t.Fatalf("create = %d %v, want 201", res.StatusCode, body)
+	}
+	name, _ := body["name"].(string)
+	if name != "こんにちは世界" {
+		t.Fatalf("folder name = %q, want the title's letters", name)
+	}
+	index := filepath.Join(f.base, "drafts", "ideas", name, "index.md")
+	data, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "slug: "+name) {
+		t.Errorf("frontmatter does not pin slug to %q:\n%s", name, data)
+	}
+}

@@ -240,3 +240,31 @@ func TestLegacyLayoutFallback(t *testing.T) {
 		t.Fatalf("got %+v, want letters", cols)
 	}
 }
+
+// TestDetectLegacyLayoutWithMdxFolder verifies the legacy directory-per-
+// collection fallback recognizes a collection whose only content is a
+// folder post with an index.mdx entry file.
+func TestDetectLegacyLayoutWithMdxFolder(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "astro.config.mjs"), []byte("// astro\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"dependencies":{"astro":"^7.0.0"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	postDir := filepath.Join(root, "src", "content", "blog", "mdx-post")
+	if err := os.MkdirAll(postDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(postDir, "index.mdx"), []byte("---\ntitle: MDX\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cols, err := DetectCollections(root)
+	if err != nil {
+		t.Fatalf("detect: %v", err)
+	}
+	if len(cols) != 1 || cols[0].Name != "blog" {
+		t.Fatalf("got %+v, want one blog collection", cols)
+	}
+}

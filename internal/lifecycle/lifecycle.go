@@ -110,8 +110,7 @@ func (m *Manager) FindIn(name, state string) (*posts.Post, error) {
 	if err != nil {
 		return nil, err
 	}
-	index := filepath.Join(dir, name, "index.md")
-	if _, err := os.Stat(index); err == nil {
+	if index, ok := posts.FolderIndex(filepath.Join(dir, name)); ok {
 		p, err := posts.Read(index)
 		if err != nil {
 			return nil, err
@@ -290,12 +289,16 @@ func sameOrUnder(root, path string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
-var slugNonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
+// slugSeparator matches everything that is not a letter, number, or
+// combining mark in any script: titles keep their non-ASCII letters instead
+// of collapsing to a placeholder, while separator runs still normalize to -.
+var slugSeparator = regexp.MustCompile(`[^\p{L}\p{N}\p{M}]+`)
 
-// Slugify derives a URL-friendly, folder-safe name from a title.
+// Slugify derives a URL-friendly, folder-safe name from a title: the title's
+// own letters and numbers, whatever their script, lowercased and separated.
 func Slugify(title string) string {
 	s := strings.ToLower(strings.TrimSpace(title))
-	s = slugNonAlnum.ReplaceAllString(s, "-")
+	s = slugSeparator.ReplaceAllString(s, "-")
 	s = strings.Trim(s, "-")
 	if s == "" {
 		s = "untitled"
