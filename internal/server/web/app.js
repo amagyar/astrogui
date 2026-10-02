@@ -6,10 +6,11 @@
 (function () {
   var MD = window.ASTROGUI_MARKDOWN;
   var EditorState = window.ASTROGUI_EDITOR_STATE;
+  var BoardState = window.ASTROGUI_BOARD_STATE;
   var token = (location.hash.match(/token=([a-f0-9]+)/) || [])[1] || "";
   var state = {
     board: null, editorPost: null, editorModTime: null, editorBaseline: null,
-    conflictAction: null, conflictData: null, commitPush: false, funnel: null,
+    conflictAction: null, conflictData: null, commitPush: false,
   };
   var $ = function (id) { return document.getElementById(id); };
 
@@ -160,8 +161,13 @@
         el.addEventListener("dragstart", function (ev) {
           ev.dataTransfer.setData("text/plain", card.name);
           el.style.opacity = 0.5;
+          boardDragging = true;
         });
-        el.addEventListener("dragend", function () { el.style.opacity = ""; });
+        el.addEventListener("dragend", function () {
+          el.style.opacity = "";
+          boardDragging = false;
+          tryBoardRender(); // a deferred refresh applies now that the drag ended
+        });
         col.appendChild(el);
       });
 
@@ -177,11 +183,51 @@
     });
   }
 
+  var lastBoardFingerprint = "";
+  var boardRenderQueued = null; // fingerprint awaiting application
+  var boardRenderTimer = null;
+  var boardDragging = false;
+
   function refreshBoard() {
     return api("GET", boardURL()).then(function (data) {
       state.board = data;
-      renderBoard(data);
+      var fp = BoardState.fingerprint(data);
+      // An unchanged listing rebuilds nothing: no DOM churn, and nothing
+      // the user is doing gets interrupted.
+      if (fp !== lastBoardFingerprint) queueBoardRender(fp);
     });
+  }
+
+  // queueBoardRender applies a changed listing when the board is free, and
+  // defers while the user is interacting with it — keyboard focus inside
+  // the board (an open move control keeps its focus there) or an active
+  // drag — so a refresh never interrupts the user. A timer retries every
+  // second until the board is quiet, and the drag's end retries at once.
+  function queueBoardRender(fp) {
+    boardRenderQueued = fp;
+    tryBoardRender();
+  }
+
+  function tryBoardRender() {
+    if (boardRenderQueued == null) return;
+    if (boardInteractionActive()) {
+      if (boardRenderTimer == null) {
+        boardRenderTimer = setTimeout(function () {
+          boardRenderTimer = null;
+          tryBoardRender();
+        }, 1000);
+      }
+      return;
+    }
+    lastBoardFingerprint = boardRenderQueued;
+    boardRenderQueued = null;
+    renderBoard(state.board);
+  }
+
+  function boardInteractionActive() {
+    if (boardDragging) return true;
+    var el = document.activeElement;
+    return !!(el && $("board").contains(el));
   }
 
   function boardURL() { return "/api/collections/" + COLLECTION + "/board"; }
@@ -213,19 +259,20 @@
 
   function toggleFunnel() {
     var panel = $("funnel-panel");
-    if (!state.funnel) {
-      api("GET", "/api/collections/" + COLLECTION + "/funnel").then(function (f) {
-        state.funnel = f;
-        var rows = Object.keys(f.counts).map(function (st) {
-          return "<tr><td>" + (STATE_LABELS[st] || st) + "</td><td>" + f.counts[st] +
-            "</td><td>" + (f.advanced[st] || 0) + " advanced here</td></tr>";
-        }).join("");
-        panel.innerHTML = "<strong>Funnel</strong><table>" + rows + "</table>";
-        panel.hidden = false;
-      });
-    } else {
-      panel.hidden = !panel.hidden;
+    if (!panel.hidden) {
+      panel.hidden = true;
+      return;
     }
+    // Figures are fetched on every open, so counts never go stale within a
+    // session: they always come from the directories as they are now.
+    api("GET", "/api/collections/" + COLLECTION + "/funnel").then(function (f) {
+      var rows = Object.keys(f.counts).map(function (st) {
+        return "<tr><td>" + (STATE_LABELS[st] || st) + "</td><td>" + f.counts[st] +
+          "</td><td>" + (f.advanced[st] || 0) + " advanced here</td></tr>";
+      }).join("");
+      panel.innerHTML = "<strong>Funnel</strong><table>" + rows + "</table>";
+      panel.hidden = false;
+    });
   }
 
   // ---- version control actions ------------------------------------------
@@ -720,6 +767,32 @@
     runSaveAction(action).catch(function () {});
   }
 
+  // subscribeBoardFeed opens the advisory change feed and re-reads the
+  // board when it ticks. EventSource cannot carry headers, so the session
+  // token rides in the query string of the otherwise identically guarded
+  // GET. When the feed cannot be established or keeps failing, a slow poll
+  // takes over so the board stays live either way.
+  function subscribeBoardFeed() {
+    var fallback = function () {
+      setInterval(function () { refreshBoard().catch(function () {}); }, 30000);
+    };
+    if (typeof EventSource === "undefined") {
+      fallback();
+      return;
+    }
+    var src = new EventSource("/api/collections/" + COLLECTION + "/events?token=" + encodeURIComponent(token));
+    var failures = 0;
+    src.addEventListener("ready", function () { failures = 0; });
+    src.addEventListener("changed", function () { refreshBoard().catch(function () {}); });
+    src.onerror = function () {
+      failures += 1;
+      if (failures >= 3) {
+        src.close();
+        fallback();
+      }
+    };
+  }
+
   // ---- wiring -------------------------------------------------------------
 
   var COLLECTION = null;
@@ -728,16 +801,10 @@
     api("GET", "/api/health").then(function (h) {
       COLLECTION = h.collection;
       $("projectline").textContent = h.project + " · " + h.collection;
-      return refreshBoard();
+      return refreshBoard().then(subscribeBoardFeed);
     }).catch(function (err) {
       document.body.innerHTML = '<p style="padding:20px">astrogui: ' + MD.escapeHTML(err.message) + "</p>";
     });
-
-    // The board tracks the filesystem, including changes made outside the
-    // tool: poll and re-render without any page reload.
-    setInterval(function () {
-      if (!$("editor").open) refreshBoard().catch(function () {});
-    }, 2000);
 
     $("capture-btn").addEventListener("click", capture);
     $("capture-input").addEventListener("keydown", function (ev) { if (ev.key === "Enter") capture(); });

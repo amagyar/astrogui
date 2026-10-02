@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/astrogui/astrogui/internal/cache"
@@ -31,6 +32,7 @@ import (
 	"github.com/astrogui/astrogui/internal/project"
 	"github.com/astrogui/astrogui/internal/safe"
 	"github.com/astrogui/astrogui/internal/vcs"
+	"github.com/astrogui/astrogui/internal/watch"
 )
 
 // App carries everything the server needs about the managed project.
@@ -42,6 +44,9 @@ type App struct {
 	Cache      *cache.Cache
 	Guard      *safe.Guard
 	Version    string
+	// Events is the advisory filesystem change feed over the managed
+	// directories, when watching is available; nil otherwise.
+	Events <-chan watch.Event
 }
 
 // Server is the HTTP host for one run.
@@ -51,6 +56,15 @@ type Server struct {
 	ui       fs.FS
 	expected string // expected Host header value, e.g. 127.0.0.1:4190
 	mux      *http.ServeMux
+
+	// heartbeat is the keep-alive interval for the change feed stream.
+	heartbeat time.Duration
+
+	feedMu   sync.Mutex
+	feedSubs []chan struct{}
+	// feedStarted guards the single fan-in drain; a start attempt with no
+	// feed available consumes it, so wiring events later still works.
+	feedStarted bool
 }
 
 // New mints a session token and wires the routes. The token is delivered in
@@ -62,12 +76,14 @@ func New(app *App, ui fs.FS) (*Server, error) {
 		return nil, fmt.Errorf("server: minting session token: %w", err)
 	}
 	s := &Server{
-		app:   app,
-		token: hex.EncodeToString(secret),
-		ui:    ui,
-		mux:   http.NewServeMux(),
+		app:       app,
+		token:     hex.EncodeToString(secret),
+		ui:        ui,
+		mux:       http.NewServeMux(),
+		heartbeat: 25 * time.Second,
 	}
 	s.routes()
+	s.startFeed()
 	return s, nil
 }
 
@@ -120,7 +136,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// Control 3: every API call must carry the session token. Refusal
 	// happens before any filesystem effect.
-	if strings.HasPrefix(r.URL.Path, "/api/") && r.Header.Get("X-AstroGUI-Token") != s.token {
+	if strings.HasPrefix(r.URL.Path, "/api/") && !s.tokenOK(r) {
 		http.Error(w, "refused: missing or invalid session token", http.StatusUnauthorized)
 		return
 	}
@@ -146,6 +162,22 @@ func (s *Server) hostOK(host string) bool {
 		return false
 	}
 	return host == net.JoinHostPort("localhost", port)
+}
+
+// tokenOK reports whether the request carries the session token. The header
+// is the norm; the change feed alone also accepts it as a query parameter,
+// because EventSource cannot set headers. That route is a side-effect-free
+// GET, the server is loopback-only with Host validation, and requests are
+// not logged, so a query-carried token adds no exposure beyond the
+// fragment-delivered URL the browser already holds.
+func (s *Server) tokenOK(r *http.Request) bool {
+	if r.Header.Get("X-AstroGUI-Token") == s.token {
+		return true
+	}
+	if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/events") {
+		return r.URL.Query().Get("token") == s.token
+	}
+	return false
 }
 
 // serveUI serves the embedded interface with a Content-Security-Policy that
@@ -190,6 +222,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/collections/{name}/entries/{post}/assets", s.guardCollection(s.handleUploadAsset))
 	s.mux.HandleFunc("GET /api/collections/{name}/entries/{post}/assets/{file}", s.guardCollection(s.handleAsset))
 	s.mux.HandleFunc("GET /api/collections/{name}/funnel", s.guardCollection(s.handleFunnel))
+	s.mux.HandleFunc("GET /api/collections/{name}/events", s.guardCollection(s.handleEvents))
 	s.mux.HandleFunc("GET /api/collections/{name}/git-status", s.guardCollection(s.handleGitStatus))
 	s.mux.HandleFunc("POST /api/collections/{name}/commit", s.guardCollection(s.handleCommit))
 }
@@ -620,6 +653,110 @@ func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
 		_ = err
 	}
 	writeJSON(w, 200, map[string]any{"moved": true, "to": req.To})
+}
+
+// handleEvents streams the advisory change feed to the interface as
+// server-sent events. The stream carries only that something changed — the
+// client re-reads the listing API — and stays alive with heartbeats so dead
+// connections surface as write errors and are cleaned up. Without watching,
+// the feed is refused so the client falls back to periodic refresh.
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	if s.app.Events == nil {
+		http.Error(w, "watching unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+
+	sub := make(chan struct{}, 1)
+	if !s.subscribe(sub) {
+		return
+	}
+	defer s.unsubscribe(sub)
+	s.startFeed() // lazy: covers a feed wired after the server was built
+
+	// retry: reconnect promptly after a dropped connection; "ready" tells
+	// the client the feed is live without triggering a refresh.
+	fmt.Fprint(w, "retry: 1000\n\nevent: ready\ndata: ok\n\n")
+	flusher.Flush()
+
+	heartbeat := time.NewTicker(s.heartbeat)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-sub:
+			if _, err := fmt.Fprint(w, "event: changed\ndata: .\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-heartbeat.C:
+			// A comment keeps intermediaries and the client aware the
+			// stream is alive; EventSource ignores it.
+			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+// subscribe registers a feed client; the boolean reports success.
+func (s *Server) subscribe(sub chan struct{}) bool {
+	s.feedMu.Lock()
+	defer s.feedMu.Unlock()
+	s.feedSubs = append(s.feedSubs, sub)
+	return true
+}
+
+func (s *Server) unsubscribe(sub chan struct{}) {
+	s.feedMu.Lock()
+	defer s.feedMu.Unlock()
+	for i, candidate := range s.feedSubs {
+		if candidate == sub {
+			s.feedSubs = append(s.feedSubs[:i], s.feedSubs[i+1:]...)
+			return
+		}
+	}
+}
+
+// startFeed drains the advisory watcher feed once per run and broadcasts
+// each tick to every connected client. A full client channel is skipped for
+// that tick: the next event re-triggers it, and clients re-read the
+// filesystem rather than trusting event payloads either way.
+func (s *Server) startFeed() {
+	s.feedMu.Lock()
+	if s.feedStarted || s.app.Events == nil {
+		s.feedMu.Unlock()
+		return
+	}
+	s.feedStarted = true
+	events := s.app.Events
+	s.feedMu.Unlock()
+	go func() {
+		for range events {
+			s.broadcast()
+		}
+	}()
+}
+
+// broadcast ticks every connected client without blocking on any of them.
+func (s *Server) broadcast() {
+	s.feedMu.Lock()
+	subs := append([]chan struct{}(nil), s.feedSubs...)
+	s.feedMu.Unlock()
+	for _, sub := range subs {
+		select {
+		case sub <- struct{}{}:
+		default: // a slow client misses this tick; the next event re-triggers it
+		}
+	}
 }
 
 func (s *Server) handleFunnel(w http.ResponseWriter, r *http.Request) {

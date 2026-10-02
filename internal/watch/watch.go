@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -85,11 +86,14 @@ func (w *Watcher) watchTree(dir string) error {
 	})
 }
 
-// rootFor returns the watched root containing path.
+// rootFor returns the watched root containing path. A path outside every
+// root yields "", including siblings that share a prefix: filepath.Rel
+// reports them as "../name", which is not containment.
 func (w *Watcher) rootFor(path string) string {
 	best := ""
 	for _, root := range w.roots {
-		if rel, err := filepath.Rel(root, path); err == nil && rel != ".." && !filepath.IsAbs(rel) {
+		if rel, err := filepath.Rel(root, path); err == nil && rel != ".." &&
+			!strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			if len(root) > len(best) {
 				best = root
 			}
@@ -135,6 +139,10 @@ func (w *Watcher) loop() {
 // recorded too: the entries may have appeared before the watch attached.
 func (w *Watcher) handle(ev fsnotify.Event) {
 	if ev.Has(fsnotify.Chmod) {
+		// A metadata-only change (mtime, permissions) is a modify for this
+		// feed: the board's time signals depend on modification times, and
+		// consumers re-read the filesystem rather than event payloads.
+		w.record(ev.Name, Modify)
 		return
 	}
 	if ev.Has(fsnotify.Create) {

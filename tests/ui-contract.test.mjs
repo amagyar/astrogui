@@ -49,6 +49,28 @@ test("commit confirmation allows one command sequence at a time", () => {
   assert.match(app, /confirmBtn\.disabled = false/);
 });
 
+test("board refresh is event-driven with a polling fallback", () => {
+  assert.match(app, /new EventSource\(/);
+  assert.match(app, /addEventListener\("changed", function \(\) \{ refreshBoard\(\)/);
+  // The fixed 2s poll is gone; the fallback interval is the slow one.
+  assert.match(app, /\}, 30000\)/);
+  assert.doesNotMatch(app, /\}, 2000\)/);
+});
+
+test("unchanged listings never rebuild the board, and interaction defers a rebuild", () => {
+  assert.match(app, /BoardState\.fingerprint\(data\)/);
+  assert.match(app, /if \(fp !== lastBoardFingerprint\) queueBoardRender\(fp\)/);
+  assert.match(app, /boardInteractionActive\(\)/);
+  assert.match(app, /boardDragging = true/);
+  assert.match(app, /boardDragging = false/);
+  // A ended drag applies a deferred render at once.
+  assert.match(app, /tryBoardRender\(\); \/\/ a deferred refresh applies/);
+});
+
+test("funnel figures are refetched on every open", () => {
+  assert.doesNotMatch(app, /state\.funnel/);
+});
+
 test("preview hydration asks editor-state which images are blocked instead of fetching them", () => {
   // The wiring: every data-src image is checked through blockedImageReason,
   // so loose (read-only) posts never request local images the server refuses.

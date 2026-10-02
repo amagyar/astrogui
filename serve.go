@@ -74,6 +74,17 @@ func serve(ctx context.Context, open bool) error {
 		return err
 	}
 
+	// The watcher keeps the board live through the change feed; it is
+	// advisory, and its failure is never fatal (the interface falls back
+	// to periodic refresh).
+	var events <-chan watch.Event
+	if watcher, werr := watch.New(ideas, wip, content); werr == nil {
+		defer watcher.Close()
+		events = watcher.Events()
+	} else {
+		fmt.Fprintln(os.Stderr, "astrogui: watching unavailable, board will poll:", werr)
+	}
+
 	app := &server.App{
 		Project:    proj.Root,
 		Collection: collection,
@@ -82,6 +93,7 @@ func serve(ctx context.Context, open bool) error {
 		Guard:      guard,
 		Cache:      derived,
 		Manager:    lifecycle.New(ideas, wip, content, guard, derived, proj.Root),
+		Events:     events,
 	}
 
 	// Record first-seen for posts that predate this run (derived data; the
@@ -107,14 +119,6 @@ func serve(ctx context.Context, open bool) error {
 
 	if open {
 		openBrowser(url)
-	}
-
-	// The watcher keeps the board live; it is advisory, and its failure is
-	// never fatal (the board also polls).
-	if watcher, werr := watch.New(ideas, wip, content); werr == nil {
-		defer watcher.Close()
-	} else {
-		fmt.Fprintln(os.Stderr, "astrogui: watching unavailable, board will poll:", werr)
 	}
 
 	go func() {

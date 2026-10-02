@@ -168,3 +168,30 @@ func TestEventsStayUnderWatchedRoots(t *testing.T) {
 		}
 	}
 }
+
+// TestRootForRejectsSiblingPaths is the containment regression: a directory
+// that merely shares a name prefix with a watched root (filepath.Rel reports
+// "../sibling") resolves to no root, exactly like safe.containsPath.
+func TestRootForRejectsSiblingPaths(t *testing.T) {
+	base := t.TempDir()
+	ideas := filepath.Join(base, "drafts", "ideas")
+	if err := os.MkdirAll(ideas, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	w := &Watcher{roots: []string{ideas}}
+	for _, path := range []string{
+		filepath.Join(base, "drafts", "ideas-old", "index.md"), // shares the "ideas" prefix
+		filepath.Join(base, "drafts"),
+		base,
+	} {
+		if got := w.rootFor(path); got != "" {
+			t.Errorf("rootFor(%q) = %q, want empty for a path outside the root", path, got)
+		}
+	}
+	if got := w.rootFor(filepath.Join(ideas, "post", "index.md")); got != ideas {
+		t.Errorf("rootFor(post) = %q, want %q", got, ideas)
+	}
+	if got := w.rootFor(ideas); got != ideas {
+		t.Errorf("rootFor(root itself) = %q, want %q", got, ideas)
+	}
+}

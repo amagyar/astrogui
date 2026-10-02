@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +23,7 @@ import (
 	"github.com/astrogui/astrogui/internal/lifecycle"
 	"github.com/astrogui/astrogui/internal/project"
 	"github.com/astrogui/astrogui/internal/safe"
+	"github.com/astrogui/astrogui/internal/watch"
 )
 
 // fixture builds a project fixture with a live server over it.
@@ -816,5 +819,206 @@ func TestUnicodeTitlePinsSlugEndToEnd(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "slug: "+name) {
 		t.Errorf("frontmatter does not pin slug to %q:\n%s", name, data)
+	}
+}
+
+// newWatchedFixture wires a real filesystem watcher into the fixture's app
+// so the change feed has a source.
+func newWatchedFixture(t *testing.T) *fixture {
+	t.Helper()
+	f := newFixture(t)
+	w, err := watch.New(filepath.Join(f.base, "drafts", "ideas"), filepath.Join(f.base, "drafts", "wip"), f.app.Collection.Dir)
+	if err != nil {
+		t.Fatalf("watch: %v", err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+	f.app.Events = w.Events()
+	f.srv.startFeed()
+	return f
+}
+
+// openFeed opens the change feed carrying the token in the query string,
+// the way EventSource must.
+func (f *fixture) openFeed(ctx context.Context) *http.Response {
+	f.t.Helper()
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		f.baseURL+"/api/collections/blog/events?token="+f.srv.Token(), nil)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	res, err := f.ts.Client().Do(req)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return res
+}
+
+// feedLines streams a feed response body into a channel of lines.
+type feedLines struct {
+	lines chan string
+	res   *http.Response
+}
+
+func (f *fixture) readFeed(res *http.Response) *feedLines {
+	fl := &feedLines{lines: make(chan string, 64), res: res}
+	go func() {
+		sc := bufio.NewScanner(res.Body)
+		for sc.Scan() {
+			fl.lines <- sc.Text()
+		}
+		close(fl.lines)
+	}()
+	return fl
+}
+
+func (fl *feedLines) await(t *testing.T, needle string, timeout time.Duration) bool {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case line, ok := <-fl.lines:
+			if !ok {
+				return false
+			}
+			if strings.Contains(line, needle) {
+				return true
+			}
+		case <-deadline:
+			return false
+		}
+	}
+}
+
+// TestChangeFeedGuards verifies the feed obeys the same controls as every
+// API request — token (header or, for EventSource, query) and Host — and
+// that a valid request opens the stream.
+func TestChangeFeedGuards(t *testing.T) {
+	f := newWatchedFixture(t)
+
+	get := func(url string, host string) *http.Response {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if host != "" {
+			req.Host = host
+		}
+		res, err := f.ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res
+	}
+
+	if res := get(f.baseURL+"/api/collections/blog/events", ""); res.StatusCode != 401 {
+		t.Errorf("no token = %d, want 401", res.StatusCode)
+	}
+	if res := get(f.baseURL+"/api/collections/blog/events?token=wrong", ""); res.StatusCode != 401 {
+		t.Errorf("wrong query token = %d, want 401", res.StatusCode)
+	}
+	if res := get(f.baseURL+"/api/collections/blog/events?token="+f.srv.Token(), "rebind.example:9999"); res.StatusCode != 403 {
+		t.Errorf("foreign Host = %d, want 403", res.StatusCode)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	res := f.openFeed(ctx)
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("valid query token = %d, want 200", res.StatusCode)
+	}
+	if ct := res.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", ct)
+	}
+	if !f.readFeed(res).await(t, "event: ready", 2*time.Second) {
+		t.Error("stream never announced readiness")
+	}
+}
+
+// TestChangeFeedUnavailableWithoutWatcher verifies the feed is refused, not
+// silently empty, when watching could not be established — the client's cue
+// to fall back to periodic refresh.
+func TestChangeFeedUnavailableWithoutWatcher(t *testing.T) {
+	f := newFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", f.baseURL+"/api/collections/blog/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-AstroGUI-Token", f.srv.Token())
+	res, err := f.ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("feed without watcher = %d, want 503", res.StatusCode)
+	}
+}
+
+// TestChangeFeedDeliversTicksAndSurvivesDisconnects verifies a change under
+// a watched directory reaches connected clients, and that a client dropping
+// off never blocks the others.
+func TestChangeFeedDeliversTicksAndSurvivesDisconnects(t *testing.T) {
+	f := newWatchedFixture(t)
+	ideas := filepath.Join(f.base, "drafts", "ideas")
+	postFile := filepath.Join(ideas, "tick-post", "index.md")
+	if err := os.MkdirAll(filepath.Dir(postFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ctxA, cancelA := context.WithCancel(context.Background())
+	resA := f.openFeed(ctxA)
+	a := f.readFeed(resA)
+	if !a.await(t, "event: ready", 2*time.Second) {
+		t.Fatal("client A never saw ready")
+	}
+	ctxB, cancelB := context.WithCancel(context.Background())
+	defer cancelB()
+	resB := f.openFeed(ctxB)
+	b := f.readFeed(resB)
+	if !b.await(t, "event: ready", 2*time.Second) {
+		t.Fatal("client B never saw ready")
+	}
+
+	if err := os.WriteFile(postFile, []byte("---\ntitle: Tick\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !a.await(t, "event: changed", 5*time.Second) {
+		t.Error("client A never heard about the change")
+	}
+	if !b.await(t, "event: changed", 5*time.Second) {
+		t.Error("client B never heard about the change")
+	}
+
+	// Client A drops off mid-stream.
+	cancelA()
+	resA.Body.Close()
+
+	// Another change: client B still hears about it.
+	if err := os.WriteFile(postFile, []byte("---\ntitle: Tick\n---\nbody grown"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !b.await(t, "event: changed", 5*time.Second) {
+		t.Error("a disconnected client blocked the feed for others")
+	}
+}
+
+// TestChangeFeedHeartbeat verifies the stream keeps itself alive with
+// comment pings so dead connections surface as write errors.
+func TestChangeFeedHeartbeat(t *testing.T) {
+	f := newWatchedFixture(t)
+	f.srv.heartbeat = 100 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	res := f.openFeed(ctx)
+	defer res.Body.Close()
+	if !f.readFeed(res).await(t, ": ping", 2*time.Second) {
+		t.Error("heartbeat never arrived")
 	}
 }
