@@ -257,10 +257,16 @@
       return;
     }
     var push = state.commitPush;
+    // One gesture, one command sequence: a second click while the request is
+    // in flight must not stage and commit again.
+    var confirmBtn = $("commit-confirm");
+    confirmBtn.disabled = true;
     $("commit-review").close();
     api("POST", "/api/collections/" + COLLECTION + "/commit", { message: message, push: push }).then(function (res) {
+      confirmBtn.disabled = false;
       report(res.ok ? (push ? "Committed and pushed" : "Committed") : "Action failed", res.command + "\n\n" + res.output);
     }).catch(function (err) {
+      confirmBtn.disabled = false;
       if (err.data && err.data.command) {
         report("Action failed", err.data.command + "\n\n" + (err.data.output || err.message));
       } else {
@@ -317,12 +323,31 @@
     // in the reading copy.
     var match = src.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
     if (match) src = src.slice(match[0].length);
-    $("preview").innerHTML = MD.render(src);
-    // Hydrate images through the token-checked API: img tags cannot carry
-    // headers, so bytes are fetched and turned into object URLs.
+    var pane = $("preview");
+    // The reader keeps their place: the pane does not jump back to the top
+    // when a typing pause re-renders it.
+    var scrollTop = pane.scrollTop;
+    pane.innerHTML = MD.render(src);
+    pane.scrollTop = scrollTop;
+    hydrateImages();
+  }
+
+  // imageCache holds one object URL per image reference per editing session
+  // (keyed by post name), so a re-render reattaches bytes already fetched.
+  var imageCache = {};
+
+  // Hydrate preview images through the token-checked API — img tags cannot
+  // carry headers — at most once per image per editing session: cached
+  // object URLs are reattached without a request, references that fall out
+  // of the post release their URL, and closing the editor releases the rest.
+  function hydrateImages() {
+    var p = state.editorPost;
+    if (!p) return;
+    var readOnly = !!p.readOnly;
+    var refs = {};
     $("preview").querySelectorAll("img[data-src]").forEach(function (img) {
       var ref = img.getAttribute("data-src");
-      var readOnly = !!(state.editorPost && state.editorPost.readOnly);
+      refs[ref] = true;
       var blocked = EditorState.blockedImageReason(ref, readOnly);
       if (blocked) {
         var notice = document.createElement("span");
@@ -331,28 +356,65 @@
         img.replaceWith(notice);
         return;
       }
-      var post = state.editorPost.name;
-      fetch("/api/collections/" + COLLECTION + "/entries/" + encodeURIComponent(post) +
+      var cache = imageCache[p.name] || (imageCache[p.name] = {});
+      if (cache[ref]) {
+        img.src = cache[ref];
+        hydrateDone(img);
+        return;
+      }
+      fetch("/api/collections/" + COLLECTION + "/entries/" + encodeURIComponent(p.name) +
         "/assets/" + encodeURIComponent(ref.split("?")[0]), {
         headers: { "X-AstroGUI-Token": token },
       }).then(function (res) {
         if (!res.ok) throw new Error("missing");
         return res.blob();
       }).then(function (blob) {
-        img.src = URL.createObjectURL(blob);
-        hydrateDone(img);
+        var url = URL.createObjectURL(blob);
+        if (imageCache[p.name] !== cache) {
+          URL.revokeObjectURL(url); // the editing session ended mid-flight
+          return;
+        }
+        cache[ref] = url;
+        // The element may have been replaced by a re-render while the bytes
+        // were in flight; the URL stays cached for the next render either way.
+        if (img.isConnected) {
+          img.src = url;
+          hydrateDone(img);
+        }
       }).catch(function () {
-        // A missing reference must be visible, not silent.
+        // A missing reference must be visible, not silent. Misses are not
+        // cached, so a later render can try again.
         img.classList.add("broken");
         img.alt = "missing: " + ref;
         img.removeAttribute("data-src");
       });
     });
+    // References the post no longer carries release their bytes.
+    var cache = imageCache[p.name];
+    if (cache) {
+      Object.keys(cache).forEach(function (ref) {
+        if (!refs[ref]) {
+          URL.revokeObjectURL(cache[ref]);
+          delete cache[ref];
+        }
+      });
+    }
   }
 
   function hydrateDone(img) {
     img.addEventListener("load", function () { img.classList.remove("broken"); });
     img.removeAttribute("data-src");
+  }
+
+  // releaseImageCache ends the session: every fetched image URL is revoked,
+  // and reopening the editor refetches each image exactly once more.
+  function releaseImageCache() {
+    Object.keys(imageCache).forEach(function (post) {
+      Object.keys(imageCache[post]).forEach(function (ref) {
+        URL.revokeObjectURL(imageCache[post][ref]);
+      });
+    });
+    imageCache = {};
   }
 
   function saveBody() {
@@ -628,6 +690,7 @@
   function closeEditor() {
     $("editor").close();
     hideCheckPop();
+    releaseImageCache();
     refreshBoard();
   }
 
@@ -706,7 +769,13 @@
       wrap.hidden = !wrap.hidden;
     });
     $("raw-save").addEventListener("click", function () { saveRaw().catch(function () {}); });
-    $("source").addEventListener("input", function () { updatePreview(); });
+    // Preview renders at most once per typing pause: a burst of keystrokes
+    // collapses into a single re-render instead of one per keystroke.
+    var previewTimer = null;
+    $("source").addEventListener("input", function () {
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(updatePreview, 200);
+    });
     $("source").addEventListener("paste", pasteImage);
     $("source").addEventListener("keydown", function (ev) {
       if ((ev.metaKey || ev.ctrlKey) && ev.key === "s") { ev.preventDefault(); saveAllEditorChanges().catch(function () {}); }

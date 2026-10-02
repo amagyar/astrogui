@@ -116,6 +116,12 @@ The tool SHALL keep the state move distinct from any version control operation, 
 - **WHEN** the user publishes several posts and then invokes the commit action once
 - **THEN** all of them are included in the single commit
 
+#### Scenario: One confirmation runs at most one command sequence
+
+- **WHEN** the user activates the confirmation control again while its commit is still running
+- **THEN** no second staging, commit, or push operation is started
+- **AND** the control is re-enabled when the outcome is reported
+
 #### Scenario: Push failure is reported
 
 - **WHEN** the user invokes the commit and push action and the push fails

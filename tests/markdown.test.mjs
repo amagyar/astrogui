@@ -36,6 +36,21 @@ test("images render with data-src for token-checked hydration", () => {
   assert.match(html, /<img alt="cover" data-src="cover\.jpeg">/);
 });
 
+test("code spans render literally: no emphasis, image, or link inside backticks", () => {
+  const html = MD.renderMarkdown("Use `**bold**`, `![a](b.png)`, and `[x](https://e.test)` in code.");
+  assert.match(html, /<code>\*\*bold\*\*<\/code>/);
+  assert.match(html, /<code>!\[a\]\(b\.png\)<\/code>/);
+  assert.match(html, /<code>\[x\]\(https:\/\/e\.test\)<\/code>/);
+  assert.ok(!/<img\b/.test(html), "image syntax inside a code span became an image");
+  assert.ok(!/href="https:\/\/e\.test"/.test(html), "link syntax inside a code span became a link");
+});
+
+test("code-span sentinels cannot be forged with raw NUL bytes", () => {
+  const html = MD.renderMarkdown("x\u0000CB0\u0000y");
+  assert.ok(!/\u0000/.test(html), "NUL survived into the output");
+  assert.ok(!/<code>/.test(html), "a forged sentinel produced a code span");
+});
+
 test("trailing double-space line breaks survive as <br>", () => {
   const html = MD.renderMarkdown("line one  \nline two");
   assert.match(html, /<br>/);

@@ -21,7 +21,32 @@ test("Git review and editor recovery have explicit action controls", () => {
 });
 
 test("source input rerenders from the textarea rather than treating the event as text", () => {
-  assert.match(app, /\$\("source"\)\.addEventListener\("input", function \(\) \{ updatePreview\(\); \}\)/);
+  assert.match(app, /\$\("source"\)\.addEventListener\("input", function \(\) \{/);
+  assert.match(app, /updatePreview\b/);
+});
+
+test("preview updates are debounced and preserve the reader's scroll", () => {
+  assert.match(app, /clearTimeout\(previewTimer\)/);
+  assert.match(app, /setTimeout\(updatePreview, 200\)/);
+  assert.match(app, /pane\.scrollTop = scrollTop/);
+});
+
+test("image bytes are fetched once per editing session and released when done", () => {
+  // The cache is consulted before any fetch, so a re-render reattaches
+  // already-fetched bytes without a request.
+  assert.match(app, /imageCache\[p\.name\] \|\| \(imageCache\[p\.name\] = \{\}\)/);
+  assert.match(app, /if \(cache\[ref\]\) \{/);
+  // References that fall out of the post release their object URL.
+  assert.match(app, /URL\.revokeObjectURL\(cache\[ref\]\)/);
+  // Closing the editor releases every fetched URL for the session.
+  assert.match(app, /releaseImageCache\(\)/);
+  // A first-load miss still shows the broken-reference indication.
+  assert.match(app, /img\.classList\.add\("broken"\)/);
+});
+
+test("commit confirmation allows one command sequence at a time", () => {
+  assert.match(app, /confirmBtn\.disabled = true/);
+  assert.match(app, /confirmBtn\.disabled = false/);
 });
 
 test("preview hydration asks editor-state which images are blocked instead of fetching them", () => {
