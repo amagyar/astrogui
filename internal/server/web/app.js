@@ -96,7 +96,24 @@
       col.className = "column";
       col.dataset.state = st;
       var head = document.createElement("h2");
-      head.innerHTML = "<span>" + (STATE_LABELS[st] || st) + "</span><span>" + (data.columns[st] || []).length + "</span>";
+      var headLabel = document.createElement("span");
+      headLabel.textContent = STATE_LABELS[st] || st;
+      var headRight = document.createElement("span");
+      headRight.className = "col-head-right";
+      headRight.textContent = String((data.columns[st] || []).length);
+      // Draft columns offer titled creation; the published column does not.
+      if (st === "ideas" || st === "wip") {
+        var plus = document.createElement("button");
+        plus.type = "button";
+        plus.className = "ghost col-new";
+        plus.textContent = "+";
+        plus.title = "New post";
+        plus.setAttribute("aria-label", "New post in " + (STATE_LABELS[st] || st));
+        plus.addEventListener("click", function () { openNewPost(st); });
+        headRight.appendChild(plus);
+      }
+      head.appendChild(headLabel);
+      head.appendChild(headRight);
       col.appendChild(head);
 
       (data.columns[st] || []).forEach(function (card) {
@@ -157,7 +174,29 @@
           destination.value = "";
         });
         moveLabel.appendChild(destination);
-        el.appendChild(moveLabel);
+
+        // The card's own management actions sit beside the move control;
+        // read-only cards show none of them.
+        var footer = document.createElement("div");
+        footer.className = "card-footer";
+        footer.appendChild(moveLabel);
+        if (!card.readOnly) {
+          var renameBtn = document.createElement("button");
+          renameBtn.type = "button";
+          renameBtn.className = "ghost card-action card-rename";
+          renameBtn.textContent = "Rename";
+          renameBtn.setAttribute("aria-label", "Rename " + card.title);
+          renameBtn.addEventListener("click", function () { openRename(card); });
+          var discardBtn = document.createElement("button");
+          discardBtn.type = "button";
+          discardBtn.className = "ghost card-action card-discard";
+          discardBtn.textContent = "Discard";
+          discardBtn.setAttribute("aria-label", "Discard " + card.title);
+          discardBtn.addEventListener("click", function () { openDiscard(card); });
+          footer.appendChild(renameBtn);
+          footer.appendChild(discardBtn);
+        }
+        el.appendChild(footer);
         el.addEventListener("dragstart", function (ev) {
           ev.dataTransfer.setData("text/plain", card.name);
           el.style.opacity = 0.5;
@@ -793,6 +832,80 @@
     };
   }
 
+  // ---- post management actions -------------------------------------------
+
+  var newState = null;
+
+  function openNewPost(state) {
+    newState = state;
+    $("new-post-title-text").textContent = "New post — " + (STATE_LABELS[state] || state);
+    $("new-post-title").value = "";
+    $("new-post").showModal();
+    $("new-post-title").focus();
+  }
+
+  function createPost() {
+    var title = $("new-post-title").value.trim();
+    if (!title || !newState) return;
+    api("POST", "/api/collections/" + COLLECTION + "/entries", { title: title, state: newState }).then(function () {
+      $("new-post").close();
+      refreshBoard();
+    }).catch(function (err) { report("Create failed", err.message); });
+  }
+
+  var renamePost = null;
+
+  // previewSlug approximates the name the server derives (letters and
+  // numbers, separators normalized); it is display-only — the server remains
+  // authoritative.
+  function previewSlug(name) {
+    var slug = (name || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "");
+    return slug || "untitled";
+  }
+
+  function openRename(card) {
+    renamePost = card;
+    $("rename-input").value = card.name;
+    $("rename-warning").hidden = card.state !== "published";
+    updateRenameWarning();
+    $("rename").showModal();
+    $("rename-input").focus();
+  }
+
+  function updateRenameWarning() {
+    if (!renamePost || renamePost.state !== "published") return;
+    $("rename-warning").textContent =
+      "This post is published: renaming changes its public URL path to /" +
+      previewSlug($("rename-input").value) + "/ — links to the old URL will break.";
+  }
+
+  function confirmRename() {
+    if (!renamePost) return;
+    var value = $("rename-input").value.trim();
+    if (!value) return;
+    api("POST", entryURL(renamePost.name) + "/rename", { name: value }).then(function () {
+      $("rename").close();
+      renamePost = null;
+      refreshBoard();
+    }).catch(function (err) { report("Rename failed", err.message); });
+  }
+
+  var discardPost = null;
+
+  function openDiscard(card) {
+    discardPost = card;
+    $("confirm-discard").showModal();
+  }
+
+  function confirmDiscard() {
+    if (!discardPost) return;
+    api("POST", entryURL(discardPost.name) + "/discard").then(function () {
+      $("confirm-discard").close();
+      discardPost = null;
+      refreshBoard();
+    }).catch(function (err) { report("Discard failed", err.message); });
+  }
+
   // ---- wiring -------------------------------------------------------------
 
   var COLLECTION = null;
@@ -808,6 +921,15 @@
 
     $("capture-btn").addEventListener("click", capture);
     $("capture-input").addEventListener("keydown", function (ev) { if (ev.key === "Enter") capture(); });
+    $("new-post-cancel").addEventListener("click", function () { $("new-post").close(); });
+    $("new-post-create").addEventListener("click", createPost);
+    $("new-post-title").addEventListener("keydown", function (ev) { if (ev.key === "Enter") { ev.preventDefault(); createPost(); } });
+    $("rename-cancel").addEventListener("click", function () { $("rename").close(); });
+    $("rename-confirm").addEventListener("click", confirmRename);
+    $("rename-input").addEventListener("input", updateRenameWarning);
+    $("rename-input").addEventListener("keydown", function (ev) { if (ev.key === "Enter") { ev.preventDefault(); confirmRename(); } });
+    $("discard-cancel").addEventListener("click", function () { $("confirm-discard").close(); });
+    $("discard-confirm").addEventListener("click", confirmDiscard);
     $("funnel-btn").addEventListener("click", toggleFunnel);
     $("commit-btn").addEventListener("click", function () { commit(false); });
     $("push-btn").addEventListener("click", function () { commit(true); });

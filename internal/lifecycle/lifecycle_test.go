@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/astrogui/astrogui/internal/cache"
@@ -22,7 +23,8 @@ func newManager(t *testing.T) (*Manager, string) {
 	ideas := filepath.Join(base, "drafts", "ideas")
 	wip := filepath.Join(base, "drafts", "wip")
 	content := filepath.Join(base, "src", "content", "blog")
-	guard, err := safe.New(ideas, wip, content)
+	trash := filepath.Join(base, "drafts", "trash")
+	guard, err := safe.New(ideas, wip, content, trash)
 	if err != nil {
 		t.Fatalf("guard: %v", err)
 	}
@@ -31,7 +33,7 @@ func newManager(t *testing.T) (*Manager, string) {
 	if err != nil {
 		t.Fatalf("cache: %v", err)
 	}
-	m := New(ideas, wip, content, guard, c, base)
+	m := New(ideas, wip, content, trash, guard, c, base)
 	return m, base
 }
 
@@ -483,5 +485,144 @@ func TestSlugifyKeepsUnicodeLetters(t *testing.T) {
 		if got := Slugify(in); got != want {
 			t.Errorf("Slugify(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestRenameKeepsSlugPinnedAndRefusesConflicts verifies a folder post renames
+// atomically within its state, the slug pin follows the new name, and taken
+// names and loose files are refused with both posts unchanged.
+func TestRenameKeepsSlugPinnedAndRefusesConflicts(t *testing.T) {
+	m, base := newManager(t)
+
+	dir := filepath.Join(base, "drafts", "ideas", "my-great-idea")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := "---\ntitle: My Great Idea\nslug: my-great-idea\ndate: 2026-01-01\n---\n\nBody.\n"
+	if err := os.WriteFile(filepath.Join(dir, "index.md"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	renamed, err := m.Rename("my-great-idea", posts.StateIdeas, "A Better Name!!")
+	if err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if renamed.Name != "a-better-name" {
+		t.Errorf("renamed name = %q, want a-better-name", renamed.Name)
+	}
+	if _, err := os.Stat(filepath.Join(base, "drafts", "ideas", "a-better-name", "index.md")); err != nil {
+		t.Fatalf("folder did not move: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(base, "drafts", "ideas", "a-better-name", "index.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "slug: a-better-name") {
+		t.Errorf("slug pin did not follow the rename:\n%s", data)
+	}
+	// The rest of the frontmatter survives the slug edit.
+	if !strings.Contains(string(data), "title: My Great Idea") || !strings.Contains(string(data), "date: 2026-01-01") {
+		t.Errorf("rename disturbed unrelated frontmatter:\n%s", data)
+	}
+
+	// A taken name is refused; both posts stay unchanged.
+	if err := os.MkdirAll(filepath.Join(base, "drafts", "ideas", "my-great-idea"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(base, "drafts", "ideas", "my-great-idea", "index.md"), []byte("---\ntitle: Other\n---\nx"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Rename("a-better-name", posts.StateIdeas, "My Great Idea"); !errors.Is(err, ErrDestinationExists) {
+		t.Fatalf("taken name err = %v, want ErrDestinationExists", err)
+	}
+	if _, err := os.Stat(filepath.Join(base, "drafts", "ideas", "a-better-name", "index.md")); err != nil {
+		t.Fatal("refused rename still moved the post")
+	}
+
+	// Loose files are never renamed.
+	loose := filepath.Join(base, "drafts", "ideas", "loose.md")
+	if err := os.WriteFile(loose, []byte("loose"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Rename("loose", posts.StateIdeas, "elsewhere"); err == nil {
+		t.Error("loose file was renamed")
+	}
+}
+
+// TestRenameWithoutFrontmatterLeavesFileAlone verifies a folder post with no
+// frontmatter renames without gaining (or being corrupted by) a slug line.
+func TestRenameWithoutFrontmatterLeavesFileAlone(t *testing.T) {
+	m, base := newManager(t)
+	dir := filepath.Join(base, "drafts", "wip", "plain")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.md"), []byte("just a body\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Rename("plain", posts.StateWIP, "renamed plain"); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(base, "drafts", "wip", "renamed-plain", "index.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "just a body\n" {
+		t.Errorf("frontmatter-free post was rewritten:\n%s", data)
+	}
+}
+
+// TestDiscardMovesToTrashWithCollisionSuffix verifies discarding moves the
+// folder into the trash directory intact, suffixes on collision, and refuses
+// loose files.
+func TestDiscardMovesToTrashWithCollisionSuffix(t *testing.T) {
+	m, base := newManager(t)
+	ideas := filepath.Join(base, "drafts", "ideas")
+	trash := filepath.Join(base, "drafts", "trash")
+
+	dir := filepath.Join(ideas, "doomed")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.md"), []byte("---\ntitle: Doomed\n---\nbye"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "cover.png"), []byte("PNG"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := m.Discard("doomed", posts.StateIdeas); err != nil {
+		t.Fatalf("discard: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(ideas, "doomed")); !os.IsNotExist(err) {
+		t.Fatal("post still in ideas after discard")
+	}
+	if _, err := os.Stat(filepath.Join(trash, "doomed", "index.md")); err != nil {
+		t.Fatalf("post not in trash: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(trash, "doomed", "cover.png")); err != nil {
+		t.Fatalf("image not discarded with the post: %v", err)
+	}
+
+	// Discarding the same name again suffixes rather than overwrites.
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.md"), []byte("---\ntitle: Doomed 2\n---\nbye"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Discard("doomed", posts.StateIdeas); err != nil {
+		t.Fatalf("second discard: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(trash, "doomed-2", "index.md")); err != nil {
+		t.Fatalf("collision not suffixed: %v", err)
+	}
+
+	// Loose files are never discarded.
+	if err := os.WriteFile(filepath.Join(ideas, "loose.md"), []byte("loose"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Discard("loose", posts.StateIdeas); err == nil {
+		t.Error("loose file was discarded")
 	}
 }

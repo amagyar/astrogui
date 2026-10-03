@@ -52,7 +52,8 @@ func newFixture(t *testing.T) *fixture {
 			t.Fatal(err)
 		}
 	}
-	guard, err := safe.New(ideas, wip, content)
+	trash := filepath.Join(base, "drafts", "trash")
+	guard, err := safe.New(ideas, wip, content, trash)
 	if err != nil {
 		t.Fatalf("guard: %v", err)
 	}
@@ -69,7 +70,7 @@ func newFixture(t *testing.T) *fixture {
 		Version:    "test",
 		Guard:      guard,
 		Cache:      derived,
-		Manager:    lifecycle.New(ideas, wip, content, guard, derived, base),
+		Manager:    lifecycle.New(ideas, wip, content, trash, guard, derived, base),
 	}
 	f.srv, err = New(f.app, UI())
 	if err != nil {
@@ -1020,5 +1021,67 @@ func TestChangeFeedHeartbeat(t *testing.T) {
 	defer res.Body.Close()
 	if !f.readFeed(res).await(t, ": ping", 2*time.Second) {
 		t.Error("heartbeat never arrived")
+	}
+}
+
+// TestRenameAndDiscardRoutes verifies the management actions over the API:
+// rename succeeds and reports the derived name, a taken name is a 409, and
+// loose posts are refused 403 for both routes.
+func TestRenameAndDiscardRoutes(t *testing.T) {
+	f := newFixture(t)
+	name := f.createIdea("rename me please")
+
+	// Loose file for the refusal cases.
+	content := filepath.Join(f.base, "src", "content", "blog")
+	if err := os.WriteFile(filepath.Join(content, "loose.md"), []byte("---\ntitle: Loose\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Rename succeeds and reports the slugified name.
+	res, body := f.do("POST", "/api/collections/blog/entries/"+name+"/rename", map[string]any{"name": "A Cleaner Name"})
+	if res.StatusCode != 200 {
+		t.Fatalf("rename = %d %v, want 200", res.StatusCode, body)
+	}
+	if body["name"] != "a-cleaner-name" {
+		t.Errorf("renamed name = %v, want a-cleaner-name", body["name"])
+	}
+	if _, err := os.Stat(filepath.Join(f.base, "drafts", "ideas", "a-cleaner-name", "index.md")); err != nil {
+		t.Fatalf("folder did not move: %v", err)
+	}
+
+	// Taken name: 409, both posts unchanged.
+	f.createIdea("occupy the name") // becomes occupy-the-name
+	res, body = f.do("POST", "/api/collections/blog/entries/a-cleaner-name/rename", map[string]any{"name": "occupy the name"})
+	if res.StatusCode != 409 {
+		t.Fatalf("taken name = %d %v, want 409", res.StatusCode, body)
+	}
+
+	// Loose posts are refused on both routes.
+	res, body = f.do("POST", "/api/collections/blog/entries/loose/rename", map[string]any{"name": "elsewhere"})
+	if res.StatusCode != 403 {
+		t.Fatalf("loose rename = %d %v, want 403", res.StatusCode, body)
+	}
+	res, body = f.do("POST", "/api/collections/blog/entries/loose/discard", nil)
+	if res.StatusCode != 403 {
+		t.Fatalf("loose discard = %d %v, want 403", res.StatusCode, body)
+	}
+
+	// Discard succeeds: the folder lands in the trash, not deletion.
+	res, body = f.do("POST", "/api/collections/blog/entries/a-cleaner-name/discard", nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("discard = %d %v, want 200", res.StatusCode, body)
+	}
+	if _, err := os.Stat(filepath.Join(f.base, "drafts", "trash", "a-cleaner-name", "index.md")); err != nil {
+		t.Fatalf("post not in trash: %v", err)
+	}
+	// And the board no longer lists it.
+	res, body = f.do("GET", "/api/collections/blog/board", nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("board: %d", res.StatusCode)
+	}
+	for _, card := range body["columns"].(map[string]any)["ideas"].([]any) {
+		if card.(map[string]any)["name"] == "a-cleaner-name" {
+			t.Error("discarded post still on the board")
+		}
 	}
 }

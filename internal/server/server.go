@@ -219,6 +219,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /api/collections/{name}/entries/{post}/frontmatter", s.guardCollection(s.handleSaveFrontmatter))
 	s.mux.HandleFunc("PUT /api/collections/{name}/entries/{post}/raw", s.guardCollection(s.handleSaveRaw))
 	s.mux.HandleFunc("POST /api/collections/{name}/entries/{post}/move", s.guardCollection(s.handleMove))
+	s.mux.HandleFunc("POST /api/collections/{name}/entries/{post}/rename", s.guardCollection(s.handleRename))
+	s.mux.HandleFunc("POST /api/collections/{name}/entries/{post}/discard", s.guardCollection(s.handleDiscard))
 	s.mux.HandleFunc("POST /api/collections/{name}/entries/{post}/assets", s.guardCollection(s.handleUploadAsset))
 	s.mux.HandleFunc("GET /api/collections/{name}/entries/{post}/assets/{file}", s.guardCollection(s.handleAsset))
 	s.mux.HandleFunc("GET /api/collections/{name}/funnel", s.guardCollection(s.handleFunnel))
@@ -757,6 +759,63 @@ func (s *Server) broadcast() {
 		default: // a slow client misses this tick; the next event re-triggers it
 		}
 	}
+}
+
+// handleRename renames a folder post within its state through the manager's
+// atomic rename; the pinned slug follows the new name.
+func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, fmt.Errorf("invalid request body: %w", err))
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		writeErr(w, 400, fmt.Errorf("provide a new name"))
+		return
+	}
+	p, ok := s.findPostFor(w, r.PathValue("post"))
+	if !ok {
+		return
+	}
+	if p.Loose {
+		writeErr(w, 403, fmt.Errorf("loose posts are read-only; they are never renamed"))
+		return
+	}
+	renamed, err := s.app.Manager.Rename(p.Name, p.State, req.Name)
+	if errors.Is(err, lifecycle.ErrDestinationExists) || errors.Is(err, lifecycle.ErrCrossDevice) {
+		writeErr(w, 409, err)
+		return
+	}
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"renamed": true, "name": renamed.Name})
+}
+
+// handleDiscard moves a folder post into the trash directory. Nothing is
+// deleted; recovery is moving the folder back with any tool.
+func (s *Server) handleDiscard(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.findPostFor(w, r.PathValue("post"))
+	if !ok {
+		return
+	}
+	if p.Loose {
+		writeErr(w, 403, fmt.Errorf("loose posts are read-only; they are never discarded"))
+		return
+	}
+	err := s.app.Manager.Discard(p.Name, p.State)
+	if errors.Is(err, lifecycle.ErrCrossDevice) {
+		writeErr(w, 409, err)
+		return
+	}
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"discarded": true})
 }
 
 func (s *Server) handleFunnel(w http.ResponseWriter, r *http.Request) {

@@ -71,6 +71,29 @@ test("funnel figures are refetched on every open", () => {
   assert.doesNotMatch(app, /state\.funnel/);
 });
 
+test("cards expose rename and discard; draft columns offer new post", () => {
+  assert.match(app, /openRename\(card\)/);
+  assert.match(app, /openDiscard\(card\)/);
+  assert.match(app, /if \(!card\.readOnly\)/);
+  assert.match(app, /openNewPost\(st\)/);
+  // The published column offers no creation control.
+  assert.match(app, /st === "ideas" \|\| st === "wip"/);
+  for (const id of ["new-post", "new-post-title", "rename", "rename-input", "confirm-discard", "discard-confirm"]) {
+    assert.match(html, new RegExp(`id="${id}"`), id);
+  }
+});
+
+test("published renames warn about the public URL before running", () => {
+  assert.match(app, /rename-warning/);
+  assert.match(app, /public URL path to \//);
+  assert.match(app, /previewSlug\(\$\("rename-input"\)\.value\)/);
+});
+
+test("discard confirmation names the trash location and its reversibility", () => {
+  assert.match(html, /drafts\/trash/);
+  assert.match(html, /Restore it anytime by moving the folder back/);
+});
+
 test("preview hydration asks editor-state which images are blocked instead of fetching them", () => {
   // The wiring: every data-src image is checked through blockedImageReason,
   // so loose (read-only) posts never request local images the server refuses.

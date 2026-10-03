@@ -99,3 +99,17 @@ func TestPartialOverrideKeepsOtherDefaults(t *testing.T) {
 		t.Errorf("unexpected defaults disturbed: %+v", p)
 	}
 }
+
+func TestTrashPathDefaultsAndOverride(t *testing.T) {
+	var p Project
+	if got := p.FillDefaults().TrashDir; got != "drafts/trash" {
+		t.Errorf("default TrashDir = %q, want drafts/trash", got)
+	}
+	if got := p.TrashPath("/proj"); got != filepath.Join("/proj", "drafts", "trash") {
+		t.Errorf("default TrashPath = %q", got)
+	}
+	p.TrashDir = "archive/dead"
+	if got := p.TrashPath("/proj"); got != filepath.Join("/proj", "archive", "dead") {
+		t.Errorf("override TrashPath = %q", got)
+	}
+}

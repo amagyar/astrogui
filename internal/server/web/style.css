@@ -35,8 +35,18 @@ input, textarea { font: inherit; color: var(--text); background: var(--panel); b
 .card .signals .stalled { color: var(--warn); font-weight: 600; }
 .card .signals .loose { color: var(--accent); }
 .card.readonly { opacity: 0.75; }
-.move-control { display: flex; justify-content: flex-end; margin-top: 7px; }
+.move-control { display: flex; }
 .move-control select { font: inherit; font-size: 11px; color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 5px; padding: 3px 6px; }
+.move-control select:disabled { opacity: .7; }
+.card-footer { display: flex; justify-content: flex-end; align-items: center; gap: 6px; margin-top: 7px; }
+.card-footer .card-action { font-size: 11px; padding: 3px 7px; color: var(--muted); }
+.card-footer .card-action:hover { color: var(--text); }
+.card-footer .card-discard:hover { border-color: var(--bad); color: var(--bad); }
+.col-head-right { display: inline-flex; align-items: center; gap: 6px; }
+.col-new { padding: 0 8px; font-size: 14px; line-height: 1.5; text-transform: none; }
+dialog#new-post, dialog#rename, dialog#confirm-discard { width: min(90vw, 460px); height: auto; padding: 16px; }
+dialog#new-post label, dialog#rename label { display: grid; gap: 6px; margin: 12px 0 14px; }
+.warn-note { color: var(--warn); font-size: 13px; margin: 0 0 12px; overflow-wrap: anywhere; }
 .move-control select:disabled { opacity: .7; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 

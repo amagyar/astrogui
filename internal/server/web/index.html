@@ -92,6 +92,34 @@
     <div class="row"><button id="report-close" class="primary">Close</button></div>
   </dialog>
 
+  <dialog id="new-post">
+    <h3 id="new-post-title-text">New post</h3>
+    <label>Title <input id="new-post-title" type="text" autocomplete="off"></label>
+    <div class="row">
+      <button id="new-post-cancel" class="ghost">Cancel</button>
+      <button id="new-post-create" class="primary">Create</button>
+    </div>
+  </dialog>
+
+  <dialog id="rename">
+    <h3>Rename post</h3>
+    <label>New name <input id="rename-input" type="text" autocomplete="off" spellcheck="false"></label>
+    <p id="rename-warning" class="warn-note" hidden></p>
+    <div class="row">
+      <button id="rename-cancel" class="ghost">Cancel</button>
+      <button id="rename-confirm" class="primary">Rename</button>
+    </div>
+  </dialog>
+
+  <dialog id="confirm-discard">
+    <h3>Discard this post?</h3>
+    <p id="discard-detail">The post folder moves to drafts/trash with its images; nothing is deleted. Restore it anytime by moving the folder back into a draft directory, or delete it there to remove it permanently.</p>
+    <div class="row">
+      <button id="discard-cancel" class="ghost">Cancel</button>
+      <button id="discard-confirm" class="primary">Discard</button>
+    </div>
+  </dialog>
+
   <div id="funnel-panel" hidden></div>
 
   <script src="/markdown.js"></script>

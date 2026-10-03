@@ -26,6 +26,9 @@ type Project struct {
 	IdeasDir string `json:"ideasDir,omitempty"`
 	// WipDir is the in-progress draft directory. Default "drafts/wip".
 	WipDir string `json:"wipDir,omitempty"`
+	// TrashDir is the discard directory: posts removed from the board move
+	// here instead of being deleted. Default "drafts/trash".
+	TrashDir string `json:"trashDir,omitempty"`
 	// ContentDir overrides the detected content collection directory.
 	// Empty means "use the detected directory".
 	ContentDir string `json:"contentDir,omitempty"`
@@ -48,6 +51,9 @@ func (p Project) FillDefaults() Project {
 	}
 	if p.WipDir == "" {
 		p.WipDir = "drafts/wip"
+	}
+	if p.TrashDir == "" {
+		p.TrashDir = "drafts/trash"
 	}
 	if p.Staleness <= 0 {
 		p.Staleness = DefaultStaleness
@@ -83,6 +89,11 @@ func (p Project) IdeasPath(root string) string {
 // WipPath returns the absolute in-progress directory for project root.
 func (p Project) WipPath(root string) string {
 	return ResolveDir(root, p.FillDefaults().WipDir)
+}
+
+// TrashPath returns the absolute trash directory for project root.
+func (p Project) TrashPath(root string) string {
+	return ResolveDir(root, p.FillDefaults().TrashDir)
 }
 
 // ContentPath returns the absolute content directory override for project

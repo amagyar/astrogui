@@ -62,9 +62,10 @@ func serve(ctx context.Context, open bool) error {
 
 	ideas := cfg.IdeasPath(proj.Root)
 	wip := cfg.WipPath(proj.Root)
+	trash := cfg.TrashPath(proj.Root)
 	content := collection.Dir
 
-	guard, err := safe.New(ideas, wip, content)
+	guard, err := safe.New(ideas, wip, content, trash)
 	if err != nil {
 		return err
 	}
@@ -92,7 +93,7 @@ func serve(ctx context.Context, open bool) error {
 		Version:    version,
 		Guard:      guard,
 		Cache:      derived,
-		Manager:    lifecycle.New(ideas, wip, content, guard, derived, proj.Root),
+		Manager:    lifecycle.New(ideas, wip, content, trash, guard, derived, proj.Root),
 		Events:     events,
 	}
 
