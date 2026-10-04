@@ -95,6 +95,7 @@ func serve(ctx context.Context, open bool) error {
 		Cache:      derived,
 		Manager:    lifecycle.New(ideas, wip, content, trash, guard, derived, proj.Root),
 		Events:     events,
+		DevURL:     cfg.EffectiveDevURL(),
 	}
 
 	// Record first-seen for posts that predate this run (derived data; the

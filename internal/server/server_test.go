@@ -1085,3 +1085,85 @@ func TestRenameAndDiscardRoutes(t *testing.T) {
 		}
 	}
 }
+
+// TestDevURLRoute verifies the dev-server bridge: URL shapes for default and
+// configured bases, honest reachability both ways, and the standard request
+// guards.
+func TestDevURLRoute(t *testing.T) {
+	f := newFixture(t)
+
+	// Default shape: Astro's conventional base plus the slug.
+	res, body := f.do("GET", "/api/collections/blog/dev-url?slug=my-post", nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("dev-url = %d %v, want 200", res.StatusCode, body)
+	}
+	if body["url"] != "http://localhost:4321/my-post/" {
+		t.Errorf("default url = %v", body["url"])
+	}
+	if _, ok := body["reachable"].(bool); !ok {
+		t.Errorf("reachable = %v, want a boolean", body["reachable"])
+	}
+
+	// A configured base with a subpath and trailing slash joins cleanly.
+	f.app.DevURL = "http://localhost:4321/posts/"
+	res, body = f.do("GET", "/api/collections/blog/dev-url?slug=my-post", nil)
+	if res.StatusCode != 200 || body["url"] != "http://localhost:4321/posts/my-post/" {
+		t.Fatalf("subpath url = %d %v", res.StatusCode, body)
+	}
+
+	// Nothing listening: reachable is honestly false (port 1 refuses fast).
+	f.app.DevURL = "http://127.0.0.1:1"
+	res, body = f.do("GET", "/api/collections/blog/dev-url?slug=x", nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("probe-false response = %d", res.StatusCode)
+	}
+	if body["reachable"] != false {
+		t.Errorf("reachable = %v, want false", body["reachable"])
+	}
+
+	// Something listening: reachable is true.
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound) // any answer means running
+	}))
+	defer up.Close()
+	f.app.DevURL = up.URL
+	res, body = f.do("GET", "/api/collections/blog/dev-url?slug=x", nil)
+	if res.StatusCode != 200 || body["reachable"] != true {
+		t.Fatalf("reachable-true = %d %v", res.StatusCode, body)
+	}
+
+	// The route obeys the standard guards: token and Host.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", f.baseURL+"/api/collections/blog/dev-url?slug=x", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err = f.ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 401 {
+		t.Errorf("no token = %d, want 401", res.StatusCode)
+	}
+	req, err = http.NewRequestWithContext(ctx, "GET", f.baseURL+"/api/collections/blog/dev-url?slug=x", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = "rebind.example:9999"
+	res, err = f.ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 403 {
+		t.Errorf("foreign Host = %d, want 403", res.StatusCode)
+	}
+
+	// A missing slug is a named client error.
+	res, body = f.do("GET", "/api/collections/blog/dev-url", nil)
+	if res.StatusCode != 400 {
+		t.Fatalf("missing slug = %d %v, want 400", res.StatusCode, body)
+	}
+}

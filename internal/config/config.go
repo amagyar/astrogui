@@ -18,6 +18,10 @@ import (
 // it stalled.
 const DefaultStaleness = 30 * 24 * time.Hour
 
+// DefaultDevURL is the dev-server base URL used when none is configured:
+// Astro's conventional dev-server address.
+const DefaultDevURL = "http://localhost:4321"
+
 // Project is the per-project configuration. The zero value plus FillDefaults
 // yields the conventional layout; persisted fields are overrides only.
 type Project struct {
@@ -36,6 +40,9 @@ type Project struct {
 	Staleness time.Duration `json:"staleness,omitempty"`
 	// Collection names the managed collection when more than one exists.
 	Collection string `json:"collection,omitempty"`
+	// DevURL overrides the dev-server base URL for the editor's dev-server
+	// bridge. Empty means Astro's conventional address.
+	DevURL string `json:"devUrl,omitempty"`
 }
 
 // File is the on-disk configuration file: per-project overrides keyed by
@@ -67,6 +74,15 @@ func (p Project) EffectiveStaleness() time.Duration {
 		return DefaultStaleness
 	}
 	return p.Staleness
+}
+
+// EffectiveDevURL returns the dev-server base URL for p, defaulting to
+// Astro's conventional address when none is configured.
+func (p Project) EffectiveDevURL() string {
+	if p.DevURL == "" {
+		return DefaultDevURL
+	}
+	return p.DevURL
 }
 
 // ResolveDir resolves a configured directory against the project root,

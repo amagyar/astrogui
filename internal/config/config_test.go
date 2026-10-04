@@ -113,3 +113,17 @@ func TestTrashPathDefaultsAndOverride(t *testing.T) {
 		t.Errorf("override TrashPath = %q", got)
 	}
 }
+
+func TestEffectiveDevURLDefaultAndOverride(t *testing.T) {
+	var p Project
+	if got := p.EffectiveDevURL(); got != "http://localhost:4321" {
+		t.Errorf("default dev URL = %q, want http://localhost:4321", got)
+	}
+	if DefaultDevURL != "http://localhost:4321" {
+		t.Errorf("DefaultDevURL = %q, want the documented Astro default", DefaultDevURL)
+	}
+	p.DevURL = "http://localhost:4310/posts"
+	if got := p.EffectiveDevURL(); got != "http://localhost:4310/posts" {
+		t.Errorf("override dev URL = %q", got)
+	}
+}

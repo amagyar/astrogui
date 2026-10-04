@@ -28,6 +28,7 @@
       <div id="editor-title" class="muted"></div>
       <div class="spacer"></div>
       <button id="editor-check" class="ghost">Check</button>
+      <button id="editor-dev" class="ghost" title="Open the post at its real URL on the Astro dev server">Dev server</button>
       <button id="editor-save" class="primary">Save</button>
     </header>
     <div id="editor-meta">
@@ -117,6 +118,17 @@
     <div class="row">
       <button id="discard-cancel" class="ghost">Cancel</button>
       <button id="discard-confirm" class="primary">Discard</button>
+    </div>
+  </dialog>
+
+  <dialog id="dev-server">
+    <h3>Dev server not answering</h3>
+    <p id="dev-url-text"></p>
+    <p class="muted">The dev server may not be running. astrogui never starts it — run <code>npm run dev</code> (or <code>astro dev</code>) yourself and try again.</p>
+    <div class="row">
+      <button id="dev-cancel" class="ghost">Cancel</button>
+      <button id="dev-copy" class="ghost">Copy URL</button>
+      <button id="dev-open" class="primary">Open anyway</button>
     </div>
   </dialog>
 

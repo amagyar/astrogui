@@ -94,6 +94,20 @@ test("discard confirmation names the trash location and its reversibility", () =
   assert.match(html, /Restore it anytime by moving the folder back/);
 });
 
+test("the editor bridges to the project's dev server honestly", () => {
+  assert.match(html, /id="editor-dev"/);
+  assert.match(html, /Dev server not answering/);
+  for (const id of ["dev-server", "dev-url-text", "dev-cancel", "dev-copy", "dev-open"]) {
+    assert.match(html, new RegExp(`id="${id}"`), id);
+  }
+  // Folder posts use the pinned slug; loose posts fall back to the filename.
+  assert.match(app, /\(p\.frontmatter && p\.frontmatter\.slug\) \|\| p\.name/);
+  assert.match(app, /window\.open\(res\.url, "_blank", "noopener"\)/);
+  // Unreachable is a choice, never a claimed success.
+  assert.match(html, /Open anyway/);
+  assert.match(app, /navigator\.clipboard\.writeText\(devURL\)/);
+});
+
 test("preview hydration asks editor-state which images are blocked instead of fetching them", () => {
   // The wiring: every data-src image is checked through blockedImageReason,
   // so loose (read-only) posts never request local images the server refuses.

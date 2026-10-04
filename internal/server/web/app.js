@@ -906,6 +906,52 @@
     }).catch(function (err) { report("Discard failed", err.message); });
   }
 
+  // ---- dev-server bridge ---------------------------------------------------
+
+  var devURL = null;
+
+  // devServerSlug is the post's URL segment: the pinned slug for folder
+  // posts, the filename for loose ones.
+  function devServerSlug(p) {
+    return (p.frontmatter && p.frontmatter.slug) || p.name;
+  }
+
+  // openInDevServer asks the tool for the post's URL on the configured dev
+  // server plus an honest reachability answer (the probe runs server-side:
+  // this page is a different origin and cannot fetch the dev server itself).
+  // The tool never starts the dev server — running it stays the user's
+  // command.
+  function openInDevServer() {
+    var p = state.editorPost;
+    if (!p) return;
+    var slug = devServerSlug(p);
+    api("GET", "/api/collections/" + COLLECTION + "/dev-url?slug=" + encodeURIComponent(slug)).then(function (res) {
+      if (res.reachable) {
+        window.open(res.url, "_blank", "noopener");
+        return;
+      }
+      devURL = res.url;
+      $("dev-url-text").textContent = "Tried: " + res.url;
+      $("dev-server").showModal();
+    }).catch(function (err) { report("Dev server check failed", err.message); });
+  }
+
+  function copyDevURL() {
+    if (!devURL) return;
+    navigator.clipboard.writeText(devURL).then(function () {
+      $("dev-server").close();
+    }, function () {
+      // Clipboard access refused: the URL stays visible for manual copy.
+      report("Copy failed", "Clipboard access was refused. Copy the URL from the dialog: " + devURL);
+    });
+  }
+
+  function openDevAnyway() {
+    if (!devURL) return;
+    $("dev-server").close();
+    window.open(devURL, "_blank", "noopener");
+  }
+
   // ---- wiring -------------------------------------------------------------
 
   var COLLECTION = null;
@@ -945,6 +991,10 @@
     });
     $("editor-save").addEventListener("click", function () { saveAllEditorChanges().catch(function () {}); });
     $("editor-check").addEventListener("click", preflightCheck);
+    $("editor-dev").addEventListener("click", openInDevServer);
+    $("dev-cancel").addEventListener("click", function () { $("dev-server").close(); });
+    $("dev-copy").addEventListener("click", copyDevURL);
+    $("dev-open").addEventListener("click", openDevAnyway);
     // The check panel dismisses on any click outside itself (or on its own
     // anchor button, which toggles it).
     document.addEventListener("click", function (ev) {

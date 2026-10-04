@@ -173,7 +173,13 @@ is a **reading copy** rendered in the browser. The reading copy conveys
 content, not appearance: expect your post's structure (headings, tables, code
 fences and their metadata, footnotes, images), and do not expect the
 published site's styling, Shiki highlighting, or optimized images — the
-blog's own dev server is the fidelity tool. Nothing you type is normalized:
+blog's own dev server is the fidelity tool. The editor's **Dev server** button
+bridges to it: it opens the post at its real URL — the configured dev-server
+base (`devUrl` in the tool's config, defaulting to Astro's
+`http://localhost:4321`) joined with the post's slug — in a new tab. When the
+dev server is not running, astrogui says so, names the URL it tried, and
+offers to open or copy it anyway; it never starts or manages the dev server
+itself — running it stays your own command. Nothing you type is normalized:
 saving stores your bytes exactly, and an unchanged file is never rewritten.
 External image URLs are shown as blocked placeholders in the local preview;
 astrogui does not fetch them while rendering a post. If you leave an editor

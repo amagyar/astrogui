@@ -47,6 +47,9 @@ type App struct {
 	// Events is the advisory filesystem change feed over the managed
 	// directories, when watching is available; nil otherwise.
 	Events <-chan watch.Event
+	// DevURL is the resolved dev-server base URL for the editor's
+	// dev-server bridge.
+	DevURL string
 }
 
 // Server is the HTTP host for one run.
@@ -225,6 +228,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/collections/{name}/entries/{post}/assets/{file}", s.guardCollection(s.handleAsset))
 	s.mux.HandleFunc("GET /api/collections/{name}/funnel", s.guardCollection(s.handleFunnel))
 	s.mux.HandleFunc("GET /api/collections/{name}/events", s.guardCollection(s.handleEvents))
+	s.mux.HandleFunc("GET /api/collections/{name}/dev-url", s.guardCollection(s.handleDevURL))
 	s.mux.HandleFunc("GET /api/collections/{name}/git-status", s.guardCollection(s.handleGitStatus))
 	s.mux.HandleFunc("POST /api/collections/{name}/commit", s.guardCollection(s.handleCommit))
 }
@@ -816,6 +820,47 @@ func (s *Server) handleDiscard(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"discarded": true})
+}
+
+// handleDevURL answers the editor's dev-server bridge: the post's URL on the
+// configured dev server, and whether that server answered a probe. The probe
+// runs server-side because the interface page is a different origin from the
+// dev server and cannot fetch it directly. The tool never starts or manages
+// the dev server — running it stays the user's own command.
+func (s *Server) handleDevURL(w http.ResponseWriter, r *http.Request) {
+	slug := r.URL.Query().Get("slug")
+	if strings.TrimSpace(slug) == "" {
+		writeErr(w, 400, fmt.Errorf("provide the post's slug"))
+		return
+	}
+	base := strings.TrimRight(s.app.DevURL, "/")
+	if base == "" {
+		base = config.DefaultDevURL // an unset base must never yield a relative URL
+	}
+	writeJSON(w, 200, map[string]any{
+		"url":       base + "/" + slug + "/",
+		"reachable": probeHTTP(base, 1500*time.Millisecond),
+	})
+}
+
+// probeHTTP reports whether the origin answered within the cap. A HEAD is
+// tried first and a GET accepted, because dev servers vary in HEAD support;
+// any HTTP answer — a 404 included — means the server is running.
+func probeHTTP(origin string, timeout time.Duration) bool {
+	client := &http.Client{Timeout: timeout}
+	probe := func(method string) bool {
+		req, err := http.NewRequest(method, origin, nil)
+		if err != nil {
+			return false
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			return false
+		}
+		res.Body.Close()
+		return true
+	}
+	return probe(http.MethodHead) || probe(http.MethodGet)
 }
 
 func (s *Server) handleFunnel(w http.ResponseWriter, r *http.Request) {
