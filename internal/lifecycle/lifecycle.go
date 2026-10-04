@@ -79,6 +79,21 @@ func New(ideas, wip, content, trash string, guard *safe.Guard, c *cache.Cache, p
 	return m
 }
 
+// validPostName reports whether name is a clean single path element — the
+// only shape a post name may take. Every request-derived name funnels
+// through FindIn (or through Slugify, whose output always satisfies this),
+// so a name carrying separators or traversal can never reach a filesystem
+// path. This is the read-side twin of the write guard.
+func validPostName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	if strings.ContainsAny(name, `/\`) || strings.ContainsRune(name, 0) {
+		return false
+	}
+	return name == filepath.Base(name)
+}
+
 // DirFor returns the directory of a lifecycle state.
 func (m *Manager) DirFor(state string) (string, error) {
 	switch state {
@@ -107,8 +122,14 @@ func (m *Manager) Find(name string) (*posts.Post, error) {
 }
 
 // FindIn locates a post by name within one state's directory, returning nil
-// when the state holds no post of that name.
+// when the state holds no post of that name. A name that is not a clean
+// single path element is refused outright: request-derived names reach this
+// choke point, and a separator or traversal inside one must never reach a
+// filesystem path.
 func (m *Manager) FindIn(name, state string) (*posts.Post, error) {
+	if !validPostName(name) {
+		return nil, fmt.Errorf("lifecycle: %q is not a post name", name)
+	}
 	dir, err := m.DirFor(state)
 	if err != nil {
 		return nil, err
@@ -342,6 +363,11 @@ func (m *Manager) Rename(name, state, newName string) (*posts.Post, error) {
 		return nil, err
 	}
 	newName = Slugify(newName)
+	// Slugify's output provably satisfies this (every separator-ish run
+	// becomes "-"), but the check keeps the guarantee local to the sink.
+	if !validPostName(newName) {
+		return nil, fmt.Errorf("lifecycle: %q does not derive to a usable post name", newName)
+	}
 
 	p, err := m.FindIn(name, state)
 	if err != nil {

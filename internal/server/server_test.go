@@ -1167,3 +1167,18 @@ func TestDevURLRoute(t *testing.T) {
 		t.Fatalf("missing slug = %d %v, want 400", res.StatusCode, body)
 	}
 }
+
+// TestEntryNamesCannotTraverse is the API-level path-injection regression:
+// %2F-decoded traversal in the {post} segment must be refused, not resolved
+// against the filesystem outside the managed directories. (A bare "." never
+// reaches a post handler: the mux's path cleaning maps it to the entry-list
+// route, which is harmless.)
+func TestEntryNamesCannotTraverse(t *testing.T) {
+	f := newFixture(t)
+	for _, name := range []string{"..%2F..%2F..%2Fgo.mod", "a%2Fb", "sub%5Cdir"} {
+		res, body := f.do("GET", "/api/collections/blog/entries/"+name, nil)
+		if res.StatusCode < 400 {
+			t.Errorf("traversal name %s served: %d %v", name, res.StatusCode, body)
+		}
+	}
+}

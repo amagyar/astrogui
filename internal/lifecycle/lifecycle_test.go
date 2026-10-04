@@ -626,3 +626,26 @@ func TestDiscardMovesToTrashWithCollisionSuffix(t *testing.T) {
 		t.Error("loose file was discarded")
 	}
 }
+
+// TestFindInRefusesNonElementNames is the CodeQL path-injection regression:
+// a request-derived name carrying separators or traversal must be refused at
+// the choke point every entry name passes through, never reaching a
+// filesystem path.
+func TestFindInRefusesNonElementNames(t *testing.T) {
+	m, _ := newManager(t)
+	for _, name := range []string{"../escape", "a/b", `a\b`, ".", "..", "trailing/", "/leading", "nul\x00byte"} {
+		if p, err := m.FindIn(name, posts.StateIdeas); err == nil {
+			t.Errorf("FindIn(%q) accepted the name (post=%v)", name, p)
+		}
+		if p, err := m.Find(name); err == nil {
+			t.Errorf("Find(%q) accepted the name (post=%v)", name, p)
+		}
+	}
+	// Slugify's output always satisfies the name rule, including for
+	// traversal-shaped input.
+	for _, title := range []string{"../../../etc/passwd", "..\\..\\windows", "a/b/c"} {
+		if !validPostName(Slugify(title)) {
+			t.Errorf("Slugify(%q) produced a non-element name %q", title, Slugify(title))
+		}
+	}
+}
