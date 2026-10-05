@@ -84,7 +84,17 @@
   }
 
   function inline(s) {
-    var out = escapeHTML(s);
+    // Code spans come out first and go back last, so no later rule —
+    // image, link, or emphasis — can ever see inside them: `**x**` stays
+    // literal code, and image or link syntax inside backticks stays
+    // visible text. Sentinels carry a NUL, which typed text cannot
+    // produce (renderMarkdown strips it from the source up front).
+    var codeSpans = [];
+    var out = String(s).replace(/`([^`]+)`/g, function (m, code) {
+      codeSpans.push("<code>" + escapeHTML(code) + "</code>");
+      return "\u0000CB" + (codeSpans.length - 1) + "\u0000";
+    });
+    out = escapeHTML(out);
     // images: ![alt](src) — rendered with data-src so the app can hydrate
     // them through the token-checked API (img tags cannot set headers).
     out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;([^&]*)&quot;)?\)/g,
@@ -97,7 +107,6 @@
       if (!url) return text;
       return '<a href="' + escapeHTML(url) + '">' + text + "</a>";
     });
-    out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
     out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
     out = out.replace(/(^|\W)\*([^*\s]+)\*/g, "$1<em>$2</em>");
     out = out.replace(/(^|\W)_([^_\s]+)_/g, "$1<em>$2</em>");
@@ -106,11 +115,17 @@
     out = out.replace(/\[\^([^\]]+)\]/g, function (m, id) {
       return '<sup><a href="#fn-' + escapeHTML(id) + '">[' + escapeHTML(id) + "]</a></sup>";
     });
+    // Code spans return escaped, after every other rule has run.
+    out = out.replace(/\u0000CB(\d+)\u0000/g, function (m, i) {
+      return codeSpans[i] || "";
+    });
     return out;
   }
 
   function renderMarkdown(src) {
-    var lines = String(src || "").replace(/\r\n/g, "\n").split("\n");
+    // NUL is the code-span sentinel character; stripping it from the source
+    // keeps a crafted file from forging a sentinel of its own.
+    var lines = String(src || "").replace(/\r\n/g, "\n").replace(/\u0000/g, "").split("\n");
     var html = [];
     var i = 0;
 

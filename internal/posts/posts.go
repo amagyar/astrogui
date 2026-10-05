@@ -88,15 +88,34 @@ func Read(path string) (*Post, error) {
 		return nil, fmt.Errorf("posts: reading %s: %w", path, err)
 	}
 	p := &Post{
-		File: path,
-		Dir:  filepath.Dir(path),
-		Name: postName(path),
-		Loose: !strings.HasSuffix(filepath.Dir(path), string(filepath.Separator)) &&
-			filepath.Base(path) != "index.md",
+		File:  path,
+		Dir:   filepath.Dir(path),
+		Name:  postName(path),
+		Loose: !isIndexName(filepath.Base(path)),
 	}
 	p.raw = data
 	splitFrontmatter(p)
 	return p, nil
+}
+
+// indexNames are the entry files that make a directory a folder post, in
+// preference order: when both exist, index.md wins, deterministically.
+var indexNames = []string{"index.md", "index.mdx"}
+
+func isIndexName(base string) bool {
+	return base == "index.md" || base == "index.mdx"
+}
+
+// FolderIndex returns the entry file that makes dir a folder post —
+// index.md, else index.mdx — so callers probe both file forms once.
+func FolderIndex(dir string) (string, bool) {
+	for _, name := range indexNames {
+		index := filepath.Join(dir, name)
+		if _, err := os.Stat(index); err == nil {
+			return index, true
+		}
+	}
+	return "", false
 }
 
 func postName(path string) string {
@@ -374,8 +393,8 @@ func listDir(state, dir string) ([]*Post, error) {
 	var out []*Post
 	for _, e := range entries {
 		if e.IsDir() {
-			index := filepath.Join(dir, e.Name(), "index.md")
-			if _, err := os.Stat(index); err != nil {
+			index, ok := FolderIndex(filepath.Join(dir, e.Name()))
+			if !ok {
 				continue // not a post folder
 			}
 			p, err := Read(index)

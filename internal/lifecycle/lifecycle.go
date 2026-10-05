@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/astrogui/astrogui/internal/cache"
+	"github.com/astrogui/astrogui/internal/fmedit"
 	"github.com/astrogui/astrogui/internal/posts"
 	"github.com/astrogui/astrogui/internal/safe"
 	"github.com/goccy/go-yaml"
@@ -53,6 +54,7 @@ type Manager struct {
 	Ideas   string
 	WIP     string
 	Content string
+	Trash   string
 	Guard   *safe.Guard
 	Cache   *cache.Cache
 	Project string // project root, the cache key
@@ -63,17 +65,33 @@ type Manager struct {
 }
 
 // New creates a Manager whose every write passes the guard.
-func New(ideas, wip, content string, guard *safe.Guard, c *cache.Cache, project string) *Manager {
+func New(ideas, wip, content, trash string, guard *safe.Guard, c *cache.Cache, project string) *Manager {
 	m := &Manager{
 		Ideas:   ideas,
 		WIP:     wip,
 		Content: content,
+		Trash:   trash,
 		Guard:   guard,
 		Cache:   c,
 		Project: project,
 		rename:  os.Rename,
 	}
 	return m
+}
+
+// validPostName reports whether name is a clean single path element — the
+// only shape a post name may take. Every request-derived name funnels
+// through FindIn (or through Slugify, whose output always satisfies this),
+// so a name carrying separators or traversal can never reach a filesystem
+// path. This is the read-side twin of the write guard.
+func validPostName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	if strings.ContainsAny(name, `/\`) || strings.ContainsRune(name, 0) {
+		return false
+	}
+	return name == filepath.Base(name)
 }
 
 // DirFor returns the directory of a lifecycle state.
@@ -104,14 +122,19 @@ func (m *Manager) Find(name string) (*posts.Post, error) {
 }
 
 // FindIn locates a post by name within one state's directory, returning nil
-// when the state holds no post of that name.
+// when the state holds no post of that name. A name that is not a clean
+// single path element is refused outright: request-derived names reach this
+// choke point, and a separator or traversal inside one must never reach a
+// filesystem path.
 func (m *Manager) FindIn(name, state string) (*posts.Post, error) {
+	if !validPostName(name) {
+		return nil, fmt.Errorf("lifecycle: %q is not a post name", name)
+	}
 	dir, err := m.DirFor(state)
 	if err != nil {
 		return nil, err
 	}
-	index := filepath.Join(dir, name, "index.md")
-	if _, err := os.Stat(index); err == nil {
+	if index, ok := posts.FolderIndex(filepath.Join(dir, name)); ok {
 		p, err := posts.Read(index)
 		if err != nil {
 			return nil, err
@@ -290,12 +313,16 @@ func sameOrUnder(root, path string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
-var slugNonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
+// slugSeparator matches everything that is not a letter, number, or
+// combining mark in any script: titles keep their non-ASCII letters instead
+// of collapsing to a placeholder, while separator runs still normalize to -.
+var slugSeparator = regexp.MustCompile(`[^\p{L}\p{N}\p{M}]+`)
 
-// Slugify derives a URL-friendly, folder-safe name from a title.
+// Slugify derives a URL-friendly, folder-safe name from a title: the title's
+// own letters and numbers, whatever their script, lowercased and separated.
 func Slugify(title string) string {
 	s := strings.ToLower(strings.TrimSpace(title))
-	s = slugNonAlnum.ReplaceAllString(s, "-")
+	s = slugSeparator.ReplaceAllString(s, "-")
 	s = strings.Trim(s, "-")
 	if s == "" {
 		s = "untitled"
@@ -310,6 +337,11 @@ func (m *Manager) UniqueName(state, name string) string {
 	if err != nil {
 		return name
 	}
+	return uniqueName(dir, name)
+}
+
+// uniqueName returns name, or name-2, name-3… when dir already holds it.
+func uniqueName(dir, name string) string {
 	if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 		return name
 	}
@@ -319,6 +351,124 @@ func (m *Manager) UniqueName(state, name string) string {
 			return candidate
 		}
 	}
+}
+
+// Rename renames a folder post within its current state as a single atomic
+// directory rename, keeping the pinned slug equal to the new name (the author
+// changed the post's identity deliberately). Loose files are never renamed:
+// posts the tool did not create are read-only.
+func (m *Manager) Rename(name, state, newName string) (*posts.Post, error) {
+	dir, err := m.DirFor(state)
+	if err != nil {
+		return nil, err
+	}
+	newName = Slugify(newName)
+	// Slugify's output provably satisfies this (every separator-ish run
+	// becomes "-"), but the check keeps the guarantee local to the sink.
+	if !validPostName(newName) {
+		return nil, fmt.Errorf("lifecycle: %q does not derive to a usable post name", newName)
+	}
+
+	p, err := m.FindIn(name, state)
+	if err != nil {
+		return nil, err
+	}
+	if p == nil {
+		return nil, fmt.Errorf("lifecycle: no post %q in state %q", name, state)
+	}
+	if p.Loose {
+		return nil, fmt.Errorf("lifecycle: %q is a loose file the tool did not create; it is read-only and never renamed", name)
+	}
+
+	src := filepath.Join(dir, name)
+	dst := filepath.Join(dir, newName)
+	if src == dst {
+		return p, nil // the name already is what it derives to
+	}
+
+	// Every write passes the containment guard, source and destination.
+	if err := m.Guard.Check(src, dst); err != nil {
+		return nil, fmt.Errorf("lifecycle: refusing rename: %w", err)
+	}
+	// Refuse when the destination is taken: both posts stay unchanged.
+	if _, err := os.Lstat(dst); err == nil {
+		return nil, fmt.Errorf("%w: a post already exists at %s; both posts are unchanged", ErrDestinationExists, dst)
+	}
+
+	if err := m.rename(src, dst); err != nil {
+		if isCrossDevice(err) {
+			return nil, fmt.Errorf("%w: %s -> %s; the post is unchanged — complete the rename by hand", ErrCrossDevice, src, dst)
+		}
+		return nil, fmt.Errorf("lifecycle: rename failed, post left unchanged at %s: %w", src, err)
+	}
+
+	index, ok := posts.FolderIndex(dst)
+	if !ok {
+		return nil, fmt.Errorf("lifecycle: renamed folder at %s holds no index file", dst)
+	}
+	renamed, err := posts.Read(index)
+	if err != nil {
+		return nil, err
+	}
+	renamed.State = state
+
+	// The slug pin follows the name when the post carries frontmatter to pin
+	// it in. Best effort by design: the folder rename is the atomic operation
+	// and already succeeded, so a frontmatter edit that fails is reported by
+	// nothing and rolls back nothing — the post keeps working, and the pin
+	// still governs URL derivation from wherever it stands.
+	if renamed.HasFrontmatter() {
+		if updated, err := fmedit.Update(renamed.Frontmatter(), "slug", newName); err == nil {
+			var out []byte
+			out = append(out, renamed.Bytes()[:renamed.FMStart()]...)
+			out = append(out, updated...)
+			if len(updated) == 0 || updated[len(updated)-1] != '\n' {
+				out = append(out, '\n')
+			}
+			out = append(out, renamed.Bytes()[renamed.FMEnd():]...)
+			_ = m.Guard.AtomicWriteFile(renamed.File, out, 0o644)
+		}
+	}
+	return renamed, nil
+}
+
+// Discard moves a folder post into the trash directory as a single atomic
+// move, suffixing the name when the trash already holds a post of that name.
+// No file is deleted: recovery is moving the folder back with any tool.
+// Loose files are never discarded: posts the tool did not create are
+// read-only.
+func (m *Manager) Discard(name, state string) error {
+	srcDir, err := m.DirFor(state)
+	if err != nil {
+		return err
+	}
+	p, err := m.FindIn(name, state)
+	if err != nil {
+		return err
+	}
+	if p == nil {
+		return fmt.Errorf("lifecycle: no post %q in state %q", name, state)
+	}
+	if p.Loose {
+		return fmt.Errorf("lifecycle: %q is a loose file the tool did not create; it is read-only and never discarded", name)
+	}
+
+	src := filepath.Join(srcDir, name)
+	dst := filepath.Join(m.Trash, uniqueName(m.Trash, name))
+
+	if err := m.Guard.Check(src, dst); err != nil {
+		return fmt.Errorf("lifecycle: refusing discard: %w", err)
+	}
+	if err := m.Guard.MkdirAll(m.Trash, 0o755); err != nil {
+		return fmt.Errorf("lifecycle: preparing the trash directory: %w", err)
+	}
+	if err := m.rename(src, dst); err != nil {
+		if isCrossDevice(err) {
+			return fmt.Errorf("%w: %s -> %s; the post is unchanged — complete the move by hand", ErrCrossDevice, src, dst)
+		}
+		return fmt.Errorf("lifecycle: discard failed, post left unchanged at %s: %w", src, err)
+	}
+	return nil
 }
 
 // Create writes a new post folder in the given state. Frontmatter fields the

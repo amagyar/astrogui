@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/astrogui/astrogui/internal/cache"
@@ -31,6 +32,7 @@ import (
 	"github.com/astrogui/astrogui/internal/project"
 	"github.com/astrogui/astrogui/internal/safe"
 	"github.com/astrogui/astrogui/internal/vcs"
+	"github.com/astrogui/astrogui/internal/watch"
 )
 
 // App carries everything the server needs about the managed project.
@@ -42,6 +44,12 @@ type App struct {
 	Cache      *cache.Cache
 	Guard      *safe.Guard
 	Version    string
+	// Events is the advisory filesystem change feed over the managed
+	// directories, when watching is available; nil otherwise.
+	Events <-chan watch.Event
+	// DevURL is the resolved dev-server base URL for the editor's
+	// dev-server bridge.
+	DevURL string
 }
 
 // Server is the HTTP host for one run.
@@ -51,6 +59,15 @@ type Server struct {
 	ui       fs.FS
 	expected string // expected Host header value, e.g. 127.0.0.1:4190
 	mux      *http.ServeMux
+
+	// heartbeat is the keep-alive interval for the change feed stream.
+	heartbeat time.Duration
+
+	feedMu   sync.Mutex
+	feedSubs []chan struct{}
+	// feedStarted guards the single fan-in drain; a start attempt with no
+	// feed available consumes it, so wiring events later still works.
+	feedStarted bool
 }
 
 // New mints a session token and wires the routes. The token is delivered in
@@ -62,12 +79,14 @@ func New(app *App, ui fs.FS) (*Server, error) {
 		return nil, fmt.Errorf("server: minting session token: %w", err)
 	}
 	s := &Server{
-		app:   app,
-		token: hex.EncodeToString(secret),
-		ui:    ui,
-		mux:   http.NewServeMux(),
+		app:       app,
+		token:     hex.EncodeToString(secret),
+		ui:        ui,
+		mux:       http.NewServeMux(),
+		heartbeat: 25 * time.Second,
 	}
 	s.routes()
+	s.startFeed()
 	return s, nil
 }
 
@@ -120,7 +139,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// Control 3: every API call must carry the session token. Refusal
 	// happens before any filesystem effect.
-	if strings.HasPrefix(r.URL.Path, "/api/") && r.Header.Get("X-AstroGUI-Token") != s.token {
+	if strings.HasPrefix(r.URL.Path, "/api/") && !s.tokenOK(r) {
 		http.Error(w, "refused: missing or invalid session token", http.StatusUnauthorized)
 		return
 	}
@@ -146,6 +165,22 @@ func (s *Server) hostOK(host string) bool {
 		return false
 	}
 	return host == net.JoinHostPort("localhost", port)
+}
+
+// tokenOK reports whether the request carries the session token. The header
+// is the norm; the change feed alone also accepts it as a query parameter,
+// because EventSource cannot set headers. That route is a side-effect-free
+// GET, the server is loopback-only with Host validation, and requests are
+// not logged, so a query-carried token adds no exposure beyond the
+// fragment-delivered URL the browser already holds.
+func (s *Server) tokenOK(r *http.Request) bool {
+	if r.Header.Get("X-AstroGUI-Token") == s.token {
+		return true
+	}
+	if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/events") {
+		return r.URL.Query().Get("token") == s.token
+	}
+	return false
 }
 
 // serveUI serves the embedded interface with a Content-Security-Policy that
@@ -187,9 +222,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("PUT /api/collections/{name}/entries/{post}/frontmatter", s.guardCollection(s.handleSaveFrontmatter))
 	s.mux.HandleFunc("PUT /api/collections/{name}/entries/{post}/raw", s.guardCollection(s.handleSaveRaw))
 	s.mux.HandleFunc("POST /api/collections/{name}/entries/{post}/move", s.guardCollection(s.handleMove))
+	s.mux.HandleFunc("POST /api/collections/{name}/entries/{post}/rename", s.guardCollection(s.handleRename))
+	s.mux.HandleFunc("POST /api/collections/{name}/entries/{post}/discard", s.guardCollection(s.handleDiscard))
 	s.mux.HandleFunc("POST /api/collections/{name}/entries/{post}/assets", s.guardCollection(s.handleUploadAsset))
 	s.mux.HandleFunc("GET /api/collections/{name}/entries/{post}/assets/{file}", s.guardCollection(s.handleAsset))
 	s.mux.HandleFunc("GET /api/collections/{name}/funnel", s.guardCollection(s.handleFunnel))
+	s.mux.HandleFunc("GET /api/collections/{name}/events", s.guardCollection(s.handleEvents))
+	s.mux.HandleFunc("GET /api/collections/{name}/dev-url", s.guardCollection(s.handleDevURL))
 	s.mux.HandleFunc("GET /api/collections/{name}/git-status", s.guardCollection(s.handleGitStatus))
 	s.mux.HandleFunc("POST /api/collections/{name}/commit", s.guardCollection(s.handleCommit))
 }
@@ -318,14 +357,38 @@ func (s *Server) findPost(name string) (*posts.Post, error) {
 	return s.app.Manager.Find(name)
 }
 
-func (s *Server) handleEntry(w http.ResponseWriter, r *http.Request) {
-	p, err := s.findPost(r.PathValue("post"))
+// findPostFor writes the lookup outcome and reports whether handling may
+// continue. A post that does not exist is 404; a post that exists but could
+// not be read is 500 naming the read failure — an internal error is never
+// disguised as absence.
+func (s *Server) findPostFor(w http.ResponseWriter, name string) (*posts.Post, bool) {
+	p, err := s.findPost(name)
 	if err != nil {
 		writeErr(w, 500, err)
-		return
+		return nil, false
 	}
 	if p == nil {
-		writeErr(w, 404, fmt.Errorf("no post %q", r.PathValue("post")))
+		writeErr(w, 404, fmt.Errorf("no post %q", name))
+		return nil, false
+	}
+	return p, true
+}
+
+// modTimeOrNull returns the file's modification time, or nil when it cannot
+// be read. A save that already succeeded is still successful; the fresh time
+// is a bonus, and a stat failure (the file removed or made unreadable the
+// instant after the write) must never panic the handler.
+func modTimeOrNull(path string) any {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil
+	}
+	return info.ModTime()
+}
+
+func (s *Server) handleEntry(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.findPostFor(w, r.PathValue("post"))
+	if !ok {
 		return
 	}
 	info, _ := os.Stat(p.File)
@@ -417,9 +480,8 @@ func (s *Server) handleSaveBody(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, fmt.Errorf("invalid request body: %w", err))
 		return
 	}
-	p, err := s.findPost(r.PathValue("post"))
-	if err != nil || p == nil {
-		writeErr(w, 404, fmt.Errorf("no post %q", r.PathValue("post")))
+	p, ok := s.findPostFor(w, r.PathValue("post"))
+	if !ok {
 		return
 	}
 	if p.Loose {
@@ -432,7 +494,7 @@ func (s *Server) handleSaveBody(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 403, err)
 		return
 	}
-	err = posts.SaveBodyGuarded(s.app.Guard, p.File, []byte(req.Body), req.ModTime)
+	err := posts.SaveBodyGuarded(s.app.Guard, p.File, []byte(req.Body), req.ModTime)
 	var conflict *posts.ConflictError
 	if errors.As(err, &conflict) {
 		writeJSON(w, 409, map[string]any{
@@ -446,8 +508,7 @@ func (s *Server) handleSaveBody(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
-	info, _ := os.Stat(p.File)
-	writeJSON(w, 200, map[string]any{"saved": true, "modTime": info.ModTime()})
+	writeJSON(w, 200, map[string]any{"saved": true, "modTime": modTimeOrNull(p.File)})
 }
 
 // handleSaveFrontmatter edits structured fields. Only fields that actually
@@ -461,9 +522,8 @@ func (s *Server) handleSaveFrontmatter(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, fmt.Errorf("invalid request body: %w", err))
 		return
 	}
-	p, err := s.findPost(r.PathValue("post"))
-	if err != nil || p == nil {
-		writeErr(w, 404, fmt.Errorf("no post %q", r.PathValue("post")))
+	p, ok := s.findPostFor(w, r.PathValue("post"))
+	if !ok {
 		return
 	}
 	if p.Loose {
@@ -478,8 +538,7 @@ func (s *Server) handleSaveFrontmatter(w http.ResponseWriter, r *http.Request) {
 	// Nothing changed: no rewrite at all.
 	changed := fmedit.Changed(p.Frontmatter(), req.Fields)
 	if len(changed) == 0 {
-		info, _ := os.Stat(p.File)
-		writeJSON(w, 200, map[string]any{"saved": false, "changed": false, "modTime": info.ModTime()})
+		writeJSON(w, 200, map[string]any{"saved": false, "changed": false, "modTime": modTimeOrNull(p.File)})
 		return
 	}
 
@@ -488,6 +547,7 @@ func (s *Server) handleSaveFrontmatter(w http.ResponseWriter, r *http.Request) {
 	if len(fm) == 0 {
 		fm = []byte("\n")
 	}
+	var err error
 	for field, value := range changed {
 		fm, err = fmedit.Update(fm, field, value)
 		if err != nil {
@@ -530,8 +590,7 @@ func (s *Server) handleSaveFrontmatter(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
-	info, _ := os.Stat(p.File)
-	writeJSON(w, 200, map[string]any{"saved": true, "changed": true, "modTime": info.ModTime()})
+	writeJSON(w, 200, map[string]any{"saved": true, "changed": true, "modTime": modTimeOrNull(p.File)})
 }
 
 // handleSaveRaw replaces the whole file from the raw view.
@@ -544,16 +603,15 @@ func (s *Server) handleSaveRaw(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, fmt.Errorf("invalid request body: %w", err))
 		return
 	}
-	p, err := s.findPost(r.PathValue("post"))
-	if err != nil || p == nil {
-		writeErr(w, 404, fmt.Errorf("no post %q", r.PathValue("post")))
+	p, ok := s.findPostFor(w, r.PathValue("post"))
+	if !ok {
 		return
 	}
 	if err := s.app.Guard.Check(p.File); err != nil {
 		writeErr(w, 403, err)
 		return
 	}
-	err = posts.WriteFileGuarded(s.app.Guard, p.File, []byte(req.Content), p.Bytes(), req.ModTime)
+	err := posts.WriteFileGuarded(s.app.Guard, p.File, []byte(req.Content), p.Bytes(), req.ModTime)
 	var conflict *posts.ConflictError
 	if errors.As(err, &conflict) {
 		writeJSON(w, 409, map[string]any{
@@ -567,8 +625,7 @@ func (s *Server) handleSaveRaw(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, err)
 		return
 	}
-	info, _ := os.Stat(p.File)
-	writeJSON(w, 200, map[string]any{"saved": true, "modTime": info.ModTime()})
+	writeJSON(w, 200, map[string]any{"saved": true, "modTime": modTimeOrNull(p.File)})
 }
 
 func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
@@ -579,12 +636,11 @@ func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, fmt.Errorf("invalid request body: %w", err))
 		return
 	}
-	p, err := s.findPost(r.PathValue("post"))
-	if err != nil || p == nil {
-		writeErr(w, 404, fmt.Errorf("no post %q", r.PathValue("post")))
+	p, ok := s.findPostFor(w, r.PathValue("post"))
+	if !ok {
 		return
 	}
-	err = s.app.Manager.Move(p.Name, p.State, req.To)
+	err := s.app.Manager.Move(p.Name, p.State, req.To)
 	var checks *lifecycle.CheckFailure
 	if errors.As(err, &checks) {
 		writeJSON(w, 422, map[string]any{"error": err.Error(), "problems": checks.Problems})
@@ -603,6 +659,208 @@ func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
 		_ = err
 	}
 	writeJSON(w, 200, map[string]any{"moved": true, "to": req.To})
+}
+
+// handleEvents streams the advisory change feed to the interface as
+// server-sent events. The stream carries only that something changed — the
+// client re-reads the listing API — and stays alive with heartbeats so dead
+// connections surface as write errors and are cleaned up. Without watching,
+// the feed is refused so the client falls back to periodic refresh.
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	if s.app.Events == nil {
+		http.Error(w, "watching unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+
+	sub := make(chan struct{}, 1)
+	if !s.subscribe(sub) {
+		return
+	}
+	defer s.unsubscribe(sub)
+	s.startFeed() // lazy: covers a feed wired after the server was built
+
+	// retry: reconnect promptly after a dropped connection; "ready" tells
+	// the client the feed is live without triggering a refresh.
+	fmt.Fprint(w, "retry: 1000\n\nevent: ready\ndata: ok\n\n")
+	flusher.Flush()
+
+	heartbeat := time.NewTicker(s.heartbeat)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-sub:
+			if _, err := fmt.Fprint(w, "event: changed\ndata: .\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		case <-heartbeat.C:
+			// A comment keeps intermediaries and the client aware the
+			// stream is alive; EventSource ignores it.
+			if _, err := fmt.Fprint(w, ": ping\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+// subscribe registers a feed client; the boolean reports success.
+func (s *Server) subscribe(sub chan struct{}) bool {
+	s.feedMu.Lock()
+	defer s.feedMu.Unlock()
+	s.feedSubs = append(s.feedSubs, sub)
+	return true
+}
+
+func (s *Server) unsubscribe(sub chan struct{}) {
+	s.feedMu.Lock()
+	defer s.feedMu.Unlock()
+	for i, candidate := range s.feedSubs {
+		if candidate == sub {
+			s.feedSubs = append(s.feedSubs[:i], s.feedSubs[i+1:]...)
+			return
+		}
+	}
+}
+
+// startFeed drains the advisory watcher feed once per run and broadcasts
+// each tick to every connected client. A full client channel is skipped for
+// that tick: the next event re-triggers it, and clients re-read the
+// filesystem rather than trusting event payloads either way.
+func (s *Server) startFeed() {
+	s.feedMu.Lock()
+	if s.feedStarted || s.app.Events == nil {
+		s.feedMu.Unlock()
+		return
+	}
+	s.feedStarted = true
+	events := s.app.Events
+	s.feedMu.Unlock()
+	go func() {
+		for range events {
+			s.broadcast()
+		}
+	}()
+}
+
+// broadcast ticks every connected client without blocking on any of them.
+func (s *Server) broadcast() {
+	s.feedMu.Lock()
+	subs := append([]chan struct{}(nil), s.feedSubs...)
+	s.feedMu.Unlock()
+	for _, sub := range subs {
+		select {
+		case sub <- struct{}{}:
+		default: // a slow client misses this tick; the next event re-triggers it
+		}
+	}
+}
+
+// handleRename renames a folder post within its state through the manager's
+// atomic rename; the pinned slug follows the new name.
+func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, 400, fmt.Errorf("invalid request body: %w", err))
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		writeErr(w, 400, fmt.Errorf("provide a new name"))
+		return
+	}
+	p, ok := s.findPostFor(w, r.PathValue("post"))
+	if !ok {
+		return
+	}
+	if p.Loose {
+		writeErr(w, 403, fmt.Errorf("loose posts are read-only; they are never renamed"))
+		return
+	}
+	renamed, err := s.app.Manager.Rename(p.Name, p.State, req.Name)
+	if errors.Is(err, lifecycle.ErrDestinationExists) || errors.Is(err, lifecycle.ErrCrossDevice) {
+		writeErr(w, 409, err)
+		return
+	}
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"renamed": true, "name": renamed.Name})
+}
+
+// handleDiscard moves a folder post into the trash directory. Nothing is
+// deleted; recovery is moving the folder back with any tool.
+func (s *Server) handleDiscard(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.findPostFor(w, r.PathValue("post"))
+	if !ok {
+		return
+	}
+	if p.Loose {
+		writeErr(w, 403, fmt.Errorf("loose posts are read-only; they are never discarded"))
+		return
+	}
+	err := s.app.Manager.Discard(p.Name, p.State)
+	if errors.Is(err, lifecycle.ErrCrossDevice) {
+		writeErr(w, 409, err)
+		return
+	}
+	if err != nil {
+		writeErr(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"discarded": true})
+}
+
+// handleDevURL answers the editor's dev-server bridge: the post's URL on the
+// configured dev server, and whether that server answered a probe. The probe
+// runs server-side because the interface page is a different origin from the
+// dev server and cannot fetch it directly. The tool never starts or manages
+// the dev server — running it stays the user's own command.
+func (s *Server) handleDevURL(w http.ResponseWriter, r *http.Request) {
+	slug := r.URL.Query().Get("slug")
+	if strings.TrimSpace(slug) == "" {
+		writeErr(w, 400, fmt.Errorf("provide the post's slug"))
+		return
+	}
+	base := strings.TrimRight(s.app.DevURL, "/")
+	if base == "" {
+		base = config.DefaultDevURL // an unset base must never yield a relative URL
+	}
+	writeJSON(w, 200, map[string]any{
+		"url":       base + "/" + slug + "/",
+		"reachable": probeHTTP(base, 1500*time.Millisecond),
+	})
+}
+
+// probeHTTP reports whether the origin answered within the cap. A HEAD is
+// tried first and a GET accepted, because dev servers vary in HEAD support;
+// any HTTP answer — a 404 included — means the server is running.
+func probeHTTP(origin string, timeout time.Duration) bool {
+	client := &http.Client{Timeout: timeout}
+	probe := func(method string) bool {
+		req, err := http.NewRequest(method, origin, nil)
+		if err != nil {
+			return false
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			return false
+		}
+		res.Body.Close()
+		return true
+	}
+	return probe(http.MethodHead) || probe(http.MethodGet)
 }
 
 func (s *Server) handleFunnel(w http.ResponseWriter, r *http.Request) {
@@ -676,9 +934,8 @@ func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, fmt.Errorf("invalid request body: %w", err))
 		return
 	}
-	p, err := s.findPost(r.PathValue("post"))
-	if err != nil || p == nil {
-		writeErr(w, 404, fmt.Errorf("no post %q", r.PathValue("post")))
+	p, ok := s.findPostFor(w, r.PathValue("post"))
+	if !ok {
 		return
 	}
 	if p.Loose {
@@ -730,15 +987,25 @@ func (s *Server) handleUploadAsset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, map[string]any{"name": final})
 }
 
-// handleAsset serves a post's own asset, confined by real path after symlink
-// resolution to the post's directory.
+// handleAsset serves a post's own asset, confined by resolved real path to
+// the post's directory. A loose file has no directory of its own and exposes
+// no asset namespace — refused, exactly as upload refuses it. Responses are
+// inert documents: even opened directly as a top-level page, an asset cannot
+// execute in the tool's origin.
 func (s *Server) handleAsset(w http.ResponseWriter, r *http.Request) {
-	p, err := s.findPost(r.PathValue("post"))
-	if err != nil || p == nil {
-		writeErr(w, 404, fmt.Errorf("no post %q", r.PathValue("post")))
+	p, ok := s.findPostFor(w, r.PathValue("post"))
+	if !ok {
+		return
+	}
+	if p.Loose {
+		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
 	file := r.PathValue("file")
+
+	// An asset is bytes, never an active document in the tool's origin.
+	w.Header().Set("Content-Security-Policy", "default-src 'none'")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 
 	// Control 4: confinement by resolved real path against the post's own
 	// directory. The refusal discloses nothing about the path.

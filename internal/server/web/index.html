@@ -28,6 +28,7 @@
       <div id="editor-title" class="muted"></div>
       <div class="spacer"></div>
       <button id="editor-check" class="ghost">Check</button>
+      <button id="editor-dev" class="ghost" title="Open the post at its real URL on the Astro dev server">Dev server</button>
       <button id="editor-save" class="primary">Save</button>
     </header>
     <div id="editor-meta">
@@ -92,10 +93,50 @@
     <div class="row"><button id="report-close" class="primary">Close</button></div>
   </dialog>
 
+  <dialog id="new-post">
+    <h3 id="new-post-title-text">New post</h3>
+    <label>Title <input id="new-post-title" type="text" autocomplete="off"></label>
+    <div class="row">
+      <button id="new-post-cancel" class="ghost">Cancel</button>
+      <button id="new-post-create" class="primary">Create</button>
+    </div>
+  </dialog>
+
+  <dialog id="rename">
+    <h3>Rename post</h3>
+    <label>New name <input id="rename-input" type="text" autocomplete="off" spellcheck="false"></label>
+    <p id="rename-warning" class="warn-note" hidden></p>
+    <div class="row">
+      <button id="rename-cancel" class="ghost">Cancel</button>
+      <button id="rename-confirm" class="primary">Rename</button>
+    </div>
+  </dialog>
+
+  <dialog id="confirm-discard">
+    <h3>Discard this post?</h3>
+    <p id="discard-detail">The post folder moves to drafts/trash with its images; nothing is deleted. Restore it anytime by moving the folder back into a draft directory, or delete it there to remove it permanently.</p>
+    <div class="row">
+      <button id="discard-cancel" class="ghost">Cancel</button>
+      <button id="discard-confirm" class="primary">Discard</button>
+    </div>
+  </dialog>
+
+  <dialog id="dev-server">
+    <h3>Dev server not answering</h3>
+    <p id="dev-url-text"></p>
+    <p class="muted">The dev server may not be running. astrogui never starts it — run <code>npm run dev</code> (or <code>astro dev</code>) yourself and try again.</p>
+    <div class="row">
+      <button id="dev-cancel" class="ghost">Cancel</button>
+      <button id="dev-copy" class="ghost">Copy URL</button>
+      <button id="dev-open" class="primary">Open anyway</button>
+    </div>
+  </dialog>
+
   <div id="funnel-panel" hidden></div>
 
   <script src="/markdown.js"></script>
   <script src="/editor-state.js"></script>
+  <script src="/board-state.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

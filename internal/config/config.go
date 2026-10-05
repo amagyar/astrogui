@@ -18,6 +18,10 @@ import (
 // it stalled.
 const DefaultStaleness = 30 * 24 * time.Hour
 
+// DefaultDevURL is the dev-server base URL used when none is configured:
+// Astro's conventional dev-server address.
+const DefaultDevURL = "http://localhost:4321"
+
 // Project is the per-project configuration. The zero value plus FillDefaults
 // yields the conventional layout; persisted fields are overrides only.
 type Project struct {
@@ -26,6 +30,9 @@ type Project struct {
 	IdeasDir string `json:"ideasDir,omitempty"`
 	// WipDir is the in-progress draft directory. Default "drafts/wip".
 	WipDir string `json:"wipDir,omitempty"`
+	// TrashDir is the discard directory: posts removed from the board move
+	// here instead of being deleted. Default "drafts/trash".
+	TrashDir string `json:"trashDir,omitempty"`
 	// ContentDir overrides the detected content collection directory.
 	// Empty means "use the detected directory".
 	ContentDir string `json:"contentDir,omitempty"`
@@ -33,6 +40,9 @@ type Project struct {
 	Staleness time.Duration `json:"staleness,omitempty"`
 	// Collection names the managed collection when more than one exists.
 	Collection string `json:"collection,omitempty"`
+	// DevURL overrides the dev-server base URL for the editor's dev-server
+	// bridge. Empty means Astro's conventional address.
+	DevURL string `json:"devUrl,omitempty"`
 }
 
 // File is the on-disk configuration file: per-project overrides keyed by
@@ -49,6 +59,9 @@ func (p Project) FillDefaults() Project {
 	if p.WipDir == "" {
 		p.WipDir = "drafts/wip"
 	}
+	if p.TrashDir == "" {
+		p.TrashDir = "drafts/trash"
+	}
 	if p.Staleness <= 0 {
 		p.Staleness = DefaultStaleness
 	}
@@ -61,6 +74,15 @@ func (p Project) EffectiveStaleness() time.Duration {
 		return DefaultStaleness
 	}
 	return p.Staleness
+}
+
+// EffectiveDevURL returns the dev-server base URL for p, defaulting to
+// Astro's conventional address when none is configured.
+func (p Project) EffectiveDevURL() string {
+	if p.DevURL == "" {
+		return DefaultDevURL
+	}
+	return p.DevURL
 }
 
 // ResolveDir resolves a configured directory against the project root,
@@ -83,6 +105,11 @@ func (p Project) IdeasPath(root string) string {
 // WipPath returns the absolute in-progress directory for project root.
 func (p Project) WipPath(root string) string {
 	return ResolveDir(root, p.FillDefaults().WipDir)
+}
+
+// TrashPath returns the absolute trash directory for project root.
+func (p Project) TrashPath(root string) string {
+	return ResolveDir(root, p.FillDefaults().TrashDir)
 }
 
 // ContentPath returns the absolute content directory override for project

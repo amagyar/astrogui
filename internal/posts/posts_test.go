@@ -259,3 +259,69 @@ func TestDeriveMetaMatchesFilesystem(t *testing.T) {
 		t.Error("FirstSeen fallback is zero")
 	}
 }
+
+// TestListRecognizesMdxFolderPosts verifies a folder post whose entry file is
+// index.mdx is listed as a managed folder post exactly like index.md, and
+// that index.md wins deterministically when both exist.
+func TestListRecognizesMdxFolderPosts(t *testing.T) {
+	ideas := t.TempDir()
+	wip := t.TempDir()
+	content := t.TempDir()
+
+	mdxDir := filepath.Join(ideas, "mdx-idea")
+	if err := os.MkdirAll(mdxDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mdxDir, "index.mdx"), []byte("---\ntitle: An MDX idea\n---\n\nBody.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reading the entry file directly must also infer folder, not loose.
+	p, err := Read(filepath.Join(mdxDir, "index.mdx"))
+	if err != nil {
+		t.Fatalf("read index.mdx: %v", err)
+	}
+	if p.Loose {
+		t.Error("index.mdx read as a loose file")
+	}
+	if p.Name != "mdx-idea" {
+		t.Errorf("Name = %q, want mdx-idea", p.Name)
+	}
+
+	bothDir := filepath.Join(wip, "both-forms")
+	if err := os.MkdirAll(bothDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bothDir, "index.mdx"), []byte("---\ntitle: The MDX twin\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bothDir, "index.md"), []byte("---\ntitle: The Markdown original\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := List(ideas, wip, content)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	found := false
+	for _, p := range l.Ideas {
+		if p.Name != "mdx-idea" {
+			continue
+		}
+		found = true
+		if p.Loose {
+			t.Error("index.mdx folder post listed as loose")
+		}
+		if p.Title() != "An MDX idea" {
+			t.Errorf("Title = %q, want An MDX idea", p.Title())
+		}
+	}
+	if !found {
+		t.Error("index.mdx folder post not listed")
+	}
+	for _, p := range l.WIP {
+		if p.Name == "both-forms" && p.Title() != "The Markdown original" {
+			t.Errorf("both-forms Title = %q, want the index.md entry", p.Title())
+		}
+	}
+}

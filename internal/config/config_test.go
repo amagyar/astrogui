@@ -99,3 +99,31 @@ func TestPartialOverrideKeepsOtherDefaults(t *testing.T) {
 		t.Errorf("unexpected defaults disturbed: %+v", p)
 	}
 }
+
+func TestTrashPathDefaultsAndOverride(t *testing.T) {
+	var p Project
+	if got := p.FillDefaults().TrashDir; got != "drafts/trash" {
+		t.Errorf("default TrashDir = %q, want drafts/trash", got)
+	}
+	if got := p.TrashPath("/proj"); got != filepath.Join("/proj", "drafts", "trash") {
+		t.Errorf("default TrashPath = %q", got)
+	}
+	p.TrashDir = "archive/dead"
+	if got := p.TrashPath("/proj"); got != filepath.Join("/proj", "archive", "dead") {
+		t.Errorf("override TrashPath = %q", got)
+	}
+}
+
+func TestEffectiveDevURLDefaultAndOverride(t *testing.T) {
+	var p Project
+	if got := p.EffectiveDevURL(); got != "http://localhost:4321" {
+		t.Errorf("default dev URL = %q, want http://localhost:4321", got)
+	}
+	if DefaultDevURL != "http://localhost:4321" {
+		t.Errorf("DefaultDevURL = %q, want the documented Astro default", DefaultDevURL)
+	}
+	p.DevURL = "http://localhost:4310/posts"
+	if got := p.EffectiveDevURL(); got != "http://localhost:4310/posts" {
+		t.Errorf("override dev URL = %q", got)
+	}
+}

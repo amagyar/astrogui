@@ -116,6 +116,12 @@ The tool SHALL keep the state move distinct from any version control operation, 
 - **WHEN** the user publishes several posts and then invokes the commit action once
 - **THEN** all of them are included in the single commit
 
+#### Scenario: One confirmation runs at most one command sequence
+
+- **WHEN** the user activates the confirmation control again while its commit is still running
+- **THEN** no second staging, commit, or push operation is started
+- **AND** the control is re-enabled when the outcome is reported
+
 #### Scenario: Push failure is reported
 
 - **WHEN** the user invokes the commit and push action and the push fails
@@ -132,3 +138,84 @@ The tool SHALL keep the state move distinct from any version control operation, 
 
 - **WHEN** the user reviews the stage-all scope and cancels
 - **THEN** the tool performs no staging, commit, or push operation
+
+### Requirement: A folder post is recognized by its index file
+
+The tool SHALL treat a directory containing an `index.md` or `index.mdx` file as a folder post in every operation — listing, opening, moving, and pre-flight checks — and SHALL NOT silently skip it.
+
+#### Scenario: Folder post written in MDX
+
+- **WHEN** a managed directory contains a folder whose entry file is `index.mdx`
+- **THEN** the folder appears on the board, can be opened, moved, and checked like an `index.md` folder
+
+#### Scenario: Index file choice is preserved
+
+- **WHEN** a folder post is edited through the tool
+- **THEN** its original index filename (`index.md` or `index.mdx`) is preserved; the file form is never converted or duplicated
+
+### Requirement: Post names carry the title's letters in any script
+
+The tool SHALL derive a post's folder name from the letters and numbers of its title regardless of script, transliterating nothing but dropping only characters that are neither letters nor numbers, so titles in non-ASCII scripts do not collapse to a placeholder.
+
+#### Scenario: Title in a non-ASCII script
+
+- **WHEN** a post is created from a title whose letters are entirely non-ASCII (for example Japanese or Arabic)
+- **THEN** the resulting folder name contains those letters and does not fall back to a placeholder
+
+#### Scenario: Title with no usable letters
+
+- **WHEN** a post is created from a title containing no letters or numbers in any script
+- **THEN** the name falls back to a unique placeholder within the state directory
+
+#### Scenario: Names stay URL-safe for Astro
+
+- **WHEN** a name is derived from a title
+- **THEN** it contains no characters that would make the resulting collection entry id invalid, because separator characters are normalized to `-` as before
+
+### Requirement: A post can be renamed in place
+
+The tool SHALL rename a folder post within its current state as a single atomic directory rename, keeping the post's contents unmodified and its pinned slug equal to the new name.
+
+#### Scenario: Draft rename keeps identity consistent
+
+- **WHEN** the user renames a folder post in a draft state
+- **THEN** the folder is renamed atomically, the pinned `slug` frontmatter is updated to the new name, and no other content changes
+
+#### Scenario: Rename to a taken name is refused
+
+- **WHEN** the requested name already exists in the post's current state directory
+- **THEN** the tool refuses the rename and leaves the post unchanged
+
+#### Scenario: Renaming a published post warns about the URL
+
+- **WHEN** the user renames a post in the published state
+- **THEN** the tool requires an explicit confirmation that names the changed public URL before renaming
+
+#### Scenario: Loose files are never renamed
+
+- **WHEN** the user attempts to rename a loose post
+- **THEN** the tool refuses, because posts the tool did not create are read-only
+
+### Requirement: A post can be discarded to the trash
+
+The tool SHALL provide a discard action that moves a folder post into a trash directory (`drafts/trash` unless configured otherwise) as a single atomic move, after explicit confirmation, and the trash directory SHALL NOT appear as board content.
+
+#### Scenario: Discard removes the post from the board
+
+- **WHEN** the user confirms discarding a folder post
+- **THEN** the post's folder moves to the trash directory with its images intact, and no board column lists the trash directory
+
+#### Scenario: Discard name collision
+
+- **WHEN** the trash directory already holds a post of the same name
+- **THEN** the discarded post is given a unique suffixed name rather than overwriting the earlier one
+
+#### Scenario: Loose files are never discarded
+
+- **WHEN** the user attempts to discard a loose post
+- **THEN** the tool refuses, because posts the tool did not create are read-only
+
+#### Scenario: Recovery is manual
+
+- **WHEN** the user wants a discarded post back
+- **THEN** moving its folder from the trash directory back into a draft directory with any tool restores it to the board, and astrogui performs no special bookkeeping for it

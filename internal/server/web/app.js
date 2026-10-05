@@ -6,10 +6,11 @@
 (function () {
   var MD = window.ASTROGUI_MARKDOWN;
   var EditorState = window.ASTROGUI_EDITOR_STATE;
+  var BoardState = window.ASTROGUI_BOARD_STATE;
   var token = (location.hash.match(/token=([a-f0-9]+)/) || [])[1] || "";
   var state = {
     board: null, editorPost: null, editorModTime: null, editorBaseline: null,
-    conflictAction: null, conflictData: null, commitPush: false, funnel: null,
+    conflictAction: null, conflictData: null, commitPush: false,
   };
   var $ = function (id) { return document.getElementById(id); };
 
@@ -95,7 +96,24 @@
       col.className = "column";
       col.dataset.state = st;
       var head = document.createElement("h2");
-      head.innerHTML = "<span>" + (STATE_LABELS[st] || st) + "</span><span>" + (data.columns[st] || []).length + "</span>";
+      var headLabel = document.createElement("span");
+      headLabel.textContent = STATE_LABELS[st] || st;
+      var headRight = document.createElement("span");
+      headRight.className = "col-head-right";
+      headRight.textContent = String((data.columns[st] || []).length);
+      // Draft columns offer titled creation; the published column does not.
+      if (st === "ideas" || st === "wip") {
+        var plus = document.createElement("button");
+        plus.type = "button";
+        plus.className = "ghost col-new";
+        plus.textContent = "+";
+        plus.title = "New post";
+        plus.setAttribute("aria-label", "New post in " + (STATE_LABELS[st] || st));
+        plus.addEventListener("click", function () { openNewPost(st); });
+        headRight.appendChild(plus);
+      }
+      head.appendChild(headLabel);
+      head.appendChild(headRight);
       col.appendChild(head);
 
       (data.columns[st] || []).forEach(function (card) {
@@ -156,12 +174,39 @@
           destination.value = "";
         });
         moveLabel.appendChild(destination);
-        el.appendChild(moveLabel);
+
+        // The card's own management actions sit beside the move control;
+        // read-only cards show none of them.
+        var footer = document.createElement("div");
+        footer.className = "card-footer";
+        footer.appendChild(moveLabel);
+        if (!card.readOnly) {
+          var renameBtn = document.createElement("button");
+          renameBtn.type = "button";
+          renameBtn.className = "ghost card-action card-rename";
+          renameBtn.textContent = "Rename";
+          renameBtn.setAttribute("aria-label", "Rename " + card.title);
+          renameBtn.addEventListener("click", function () { openRename(card); });
+          var discardBtn = document.createElement("button");
+          discardBtn.type = "button";
+          discardBtn.className = "ghost card-action card-discard";
+          discardBtn.textContent = "Discard";
+          discardBtn.setAttribute("aria-label", "Discard " + card.title);
+          discardBtn.addEventListener("click", function () { openDiscard(card); });
+          footer.appendChild(renameBtn);
+          footer.appendChild(discardBtn);
+        }
+        el.appendChild(footer);
         el.addEventListener("dragstart", function (ev) {
           ev.dataTransfer.setData("text/plain", card.name);
           el.style.opacity = 0.5;
+          boardDragging = true;
         });
-        el.addEventListener("dragend", function () { el.style.opacity = ""; });
+        el.addEventListener("dragend", function () {
+          el.style.opacity = "";
+          boardDragging = false;
+          tryBoardRender(); // a deferred refresh applies now that the drag ended
+        });
         col.appendChild(el);
       });
 
@@ -177,11 +222,51 @@
     });
   }
 
+  var lastBoardFingerprint = "";
+  var boardRenderQueued = null; // fingerprint awaiting application
+  var boardRenderTimer = null;
+  var boardDragging = false;
+
   function refreshBoard() {
     return api("GET", boardURL()).then(function (data) {
       state.board = data;
-      renderBoard(data);
+      var fp = BoardState.fingerprint(data);
+      // An unchanged listing rebuilds nothing: no DOM churn, and nothing
+      // the user is doing gets interrupted.
+      if (fp !== lastBoardFingerprint) queueBoardRender(fp);
     });
+  }
+
+  // queueBoardRender applies a changed listing when the board is free, and
+  // defers while the user is interacting with it — keyboard focus inside
+  // the board (an open move control keeps its focus there) or an active
+  // drag — so a refresh never interrupts the user. A timer retries every
+  // second until the board is quiet, and the drag's end retries at once.
+  function queueBoardRender(fp) {
+    boardRenderQueued = fp;
+    tryBoardRender();
+  }
+
+  function tryBoardRender() {
+    if (boardRenderQueued == null) return;
+    if (boardInteractionActive()) {
+      if (boardRenderTimer == null) {
+        boardRenderTimer = setTimeout(function () {
+          boardRenderTimer = null;
+          tryBoardRender();
+        }, 1000);
+      }
+      return;
+    }
+    lastBoardFingerprint = boardRenderQueued;
+    boardRenderQueued = null;
+    renderBoard(state.board);
+  }
+
+  function boardInteractionActive() {
+    if (boardDragging) return true;
+    var el = document.activeElement;
+    return !!(el && $("board").contains(el));
   }
 
   function boardURL() { return "/api/collections/" + COLLECTION + "/board"; }
@@ -213,19 +298,20 @@
 
   function toggleFunnel() {
     var panel = $("funnel-panel");
-    if (!state.funnel) {
-      api("GET", "/api/collections/" + COLLECTION + "/funnel").then(function (f) {
-        state.funnel = f;
-        var rows = Object.keys(f.counts).map(function (st) {
-          return "<tr><td>" + (STATE_LABELS[st] || st) + "</td><td>" + f.counts[st] +
-            "</td><td>" + (f.advanced[st] || 0) + " advanced here</td></tr>";
-        }).join("");
-        panel.innerHTML = "<strong>Funnel</strong><table>" + rows + "</table>";
-        panel.hidden = false;
-      });
-    } else {
-      panel.hidden = !panel.hidden;
+    if (!panel.hidden) {
+      panel.hidden = true;
+      return;
     }
+    // Figures are fetched on every open, so counts never go stale within a
+    // session: they always come from the directories as they are now.
+    api("GET", "/api/collections/" + COLLECTION + "/funnel").then(function (f) {
+      var rows = Object.keys(f.counts).map(function (st) {
+        return "<tr><td>" + (STATE_LABELS[st] || st) + "</td><td>" + f.counts[st] +
+          "</td><td>" + (f.advanced[st] || 0) + " advanced here</td></tr>";
+      }).join("");
+      panel.innerHTML = "<strong>Funnel</strong><table>" + rows + "</table>";
+      panel.hidden = false;
+    });
   }
 
   // ---- version control actions ------------------------------------------
@@ -257,10 +343,16 @@
       return;
     }
     var push = state.commitPush;
+    // One gesture, one command sequence: a second click while the request is
+    // in flight must not stage and commit again.
+    var confirmBtn = $("commit-confirm");
+    confirmBtn.disabled = true;
     $("commit-review").close();
     api("POST", "/api/collections/" + COLLECTION + "/commit", { message: message, push: push }).then(function (res) {
+      confirmBtn.disabled = false;
       report(res.ok ? (push ? "Committed and pushed" : "Committed") : "Action failed", res.command + "\n\n" + res.output);
     }).catch(function (err) {
+      confirmBtn.disabled = false;
       if (err.data && err.data.command) {
         report("Action failed", err.data.command + "\n\n" + (err.data.output || err.message));
       } else {
@@ -317,40 +409,98 @@
     // in the reading copy.
     var match = src.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/);
     if (match) src = src.slice(match[0].length);
-    $("preview").innerHTML = MD.render(src);
-    // Hydrate images through the token-checked API: img tags cannot carry
-    // headers, so bytes are fetched and turned into object URLs.
+    var pane = $("preview");
+    // The reader keeps their place: the pane does not jump back to the top
+    // when a typing pause re-renders it.
+    var scrollTop = pane.scrollTop;
+    pane.innerHTML = MD.render(src);
+    pane.scrollTop = scrollTop;
+    hydrateImages();
+  }
+
+  // imageCache holds one object URL per image reference per editing session
+  // (keyed by post name), so a re-render reattaches bytes already fetched.
+  var imageCache = {};
+
+  // Hydrate preview images through the token-checked API — img tags cannot
+  // carry headers — at most once per image per editing session: cached
+  // object URLs are reattached without a request, references that fall out
+  // of the post release their URL, and closing the editor releases the rest.
+  function hydrateImages() {
+    var p = state.editorPost;
+    if (!p) return;
+    var readOnly = !!p.readOnly;
+    var refs = {};
     $("preview").querySelectorAll("img[data-src]").forEach(function (img) {
       var ref = img.getAttribute("data-src");
-      if (EditorState.isExternalImage(ref)) {
-        var external = document.createElement("span");
-        external.className = "external-image";
-        external.textContent = "External image not loaded: " + ref;
-        img.replaceWith(external);
+      refs[ref] = true;
+      var blocked = EditorState.blockedImageReason(ref, readOnly);
+      if (blocked) {
+        var notice = document.createElement("span");
+        notice.className = "external-image";
+        notice.textContent = blocked;
+        img.replaceWith(notice);
         return;
       }
-      var post = state.editorPost.name;
-      fetch("/api/collections/" + COLLECTION + "/entries/" + encodeURIComponent(post) +
+      var cache = imageCache[p.name] || (imageCache[p.name] = {});
+      if (cache[ref]) {
+        img.src = cache[ref];
+        hydrateDone(img);
+        return;
+      }
+      fetch("/api/collections/" + COLLECTION + "/entries/" + encodeURIComponent(p.name) +
         "/assets/" + encodeURIComponent(ref.split("?")[0]), {
         headers: { "X-AstroGUI-Token": token },
       }).then(function (res) {
         if (!res.ok) throw new Error("missing");
         return res.blob();
       }).then(function (blob) {
-        img.src = URL.createObjectURL(blob);
-        hydrateDone(img);
+        var url = URL.createObjectURL(blob);
+        if (imageCache[p.name] !== cache) {
+          URL.revokeObjectURL(url); // the editing session ended mid-flight
+          return;
+        }
+        cache[ref] = url;
+        // The element may have been replaced by a re-render while the bytes
+        // were in flight; the URL stays cached for the next render either way.
+        if (img.isConnected) {
+          img.src = url;
+          hydrateDone(img);
+        }
       }).catch(function () {
-        // A missing reference must be visible, not silent.
+        // A missing reference must be visible, not silent. Misses are not
+        // cached, so a later render can try again.
         img.classList.add("broken");
         img.alt = "missing: " + ref;
         img.removeAttribute("data-src");
       });
     });
+    // References the post no longer carries release their bytes.
+    var cache = imageCache[p.name];
+    if (cache) {
+      Object.keys(cache).forEach(function (ref) {
+        if (!refs[ref]) {
+          URL.revokeObjectURL(cache[ref]);
+          delete cache[ref];
+        }
+      });
+    }
   }
 
   function hydrateDone(img) {
     img.addEventListener("load", function () { img.classList.remove("broken"); });
     img.removeAttribute("data-src");
+  }
+
+  // releaseImageCache ends the session: every fetched image URL is revoked,
+  // and reopening the editor refetches each image exactly once more.
+  function releaseImageCache() {
+    Object.keys(imageCache).forEach(function (post) {
+      Object.keys(imageCache[post]).forEach(function (ref) {
+        URL.revokeObjectURL(imageCache[post][ref]);
+      });
+    });
+    imageCache = {};
   }
 
   function saveBody() {
@@ -626,6 +776,7 @@
   function closeEditor() {
     $("editor").close();
     hideCheckPop();
+    releaseImageCache();
     refreshBoard();
   }
 
@@ -655,6 +806,152 @@
     runSaveAction(action).catch(function () {});
   }
 
+  // subscribeBoardFeed opens the advisory change feed and re-reads the
+  // board when it ticks. EventSource cannot carry headers, so the session
+  // token rides in the query string of the otherwise identically guarded
+  // GET. When the feed cannot be established or keeps failing, a slow poll
+  // takes over so the board stays live either way.
+  function subscribeBoardFeed() {
+    var fallback = function () {
+      setInterval(function () { refreshBoard().catch(function () {}); }, 30000);
+    };
+    if (typeof EventSource === "undefined") {
+      fallback();
+      return;
+    }
+    var src = new EventSource("/api/collections/" + COLLECTION + "/events?token=" + encodeURIComponent(token));
+    var failures = 0;
+    src.addEventListener("ready", function () { failures = 0; });
+    src.addEventListener("changed", function () { refreshBoard().catch(function () {}); });
+    src.onerror = function () {
+      failures += 1;
+      if (failures >= 3) {
+        src.close();
+        fallback();
+      }
+    };
+  }
+
+  // ---- post management actions -------------------------------------------
+
+  var newState = null;
+
+  function openNewPost(state) {
+    newState = state;
+    $("new-post-title-text").textContent = "New post — " + (STATE_LABELS[state] || state);
+    $("new-post-title").value = "";
+    $("new-post").showModal();
+    $("new-post-title").focus();
+  }
+
+  function createPost() {
+    var title = $("new-post-title").value.trim();
+    if (!title || !newState) return;
+    api("POST", "/api/collections/" + COLLECTION + "/entries", { title: title, state: newState }).then(function () {
+      $("new-post").close();
+      refreshBoard();
+    }).catch(function (err) { report("Create failed", err.message); });
+  }
+
+  var renamePost = null;
+
+  // previewSlug approximates the name the server derives (letters and
+  // numbers, separators normalized); it is display-only — the server remains
+  // authoritative.
+  function previewSlug(name) {
+    var slug = (name || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "");
+    return slug || "untitled";
+  }
+
+  function openRename(card) {
+    renamePost = card;
+    $("rename-input").value = card.name;
+    $("rename-warning").hidden = card.state !== "published";
+    updateRenameWarning();
+    $("rename").showModal();
+    $("rename-input").focus();
+  }
+
+  function updateRenameWarning() {
+    if (!renamePost || renamePost.state !== "published") return;
+    $("rename-warning").textContent =
+      "This post is published: renaming changes its public URL path to /" +
+      previewSlug($("rename-input").value) + "/ — links to the old URL will break.";
+  }
+
+  function confirmRename() {
+    if (!renamePost) return;
+    var value = $("rename-input").value.trim();
+    if (!value) return;
+    api("POST", entryURL(renamePost.name) + "/rename", { name: value }).then(function () {
+      $("rename").close();
+      renamePost = null;
+      refreshBoard();
+    }).catch(function (err) { report("Rename failed", err.message); });
+  }
+
+  var discardPost = null;
+
+  function openDiscard(card) {
+    discardPost = card;
+    $("confirm-discard").showModal();
+  }
+
+  function confirmDiscard() {
+    if (!discardPost) return;
+    api("POST", entryURL(discardPost.name) + "/discard").then(function () {
+      $("confirm-discard").close();
+      discardPost = null;
+      refreshBoard();
+    }).catch(function (err) { report("Discard failed", err.message); });
+  }
+
+  // ---- dev-server bridge ---------------------------------------------------
+
+  var devURL = null;
+
+  // devServerSlug is the post's URL segment: the pinned slug for folder
+  // posts, the filename for loose ones.
+  function devServerSlug(p) {
+    return (p.frontmatter && p.frontmatter.slug) || p.name;
+  }
+
+  // openInDevServer asks the tool for the post's URL on the configured dev
+  // server plus an honest reachability answer (the probe runs server-side:
+  // this page is a different origin and cannot fetch the dev server itself).
+  // The tool never starts the dev server — running it stays the user's
+  // command.
+  function openInDevServer() {
+    var p = state.editorPost;
+    if (!p) return;
+    var slug = devServerSlug(p);
+    api("GET", "/api/collections/" + COLLECTION + "/dev-url?slug=" + encodeURIComponent(slug)).then(function (res) {
+      if (res.reachable) {
+        window.open(res.url, "_blank", "noopener");
+        return;
+      }
+      devURL = res.url;
+      $("dev-url-text").textContent = "Tried: " + res.url;
+      $("dev-server").showModal();
+    }).catch(function (err) { report("Dev server check failed", err.message); });
+  }
+
+  function copyDevURL() {
+    if (!devURL) return;
+    navigator.clipboard.writeText(devURL).then(function () {
+      $("dev-server").close();
+    }, function () {
+      // Clipboard access refused: the URL stays visible for manual copy.
+      report("Copy failed", "Clipboard access was refused. Copy the URL from the dialog: " + devURL);
+    });
+  }
+
+  function openDevAnyway() {
+    if (!devURL) return;
+    $("dev-server").close();
+    window.open(devURL, "_blank", "noopener");
+  }
+
   // ---- wiring -------------------------------------------------------------
 
   var COLLECTION = null;
@@ -663,19 +960,22 @@
     api("GET", "/api/health").then(function (h) {
       COLLECTION = h.collection;
       $("projectline").textContent = h.project + " · " + h.collection;
-      return refreshBoard();
+      return refreshBoard().then(subscribeBoardFeed);
     }).catch(function (err) {
       document.body.innerHTML = '<p style="padding:20px">astrogui: ' + MD.escapeHTML(err.message) + "</p>";
     });
 
-    // The board tracks the filesystem, including changes made outside the
-    // tool: poll and re-render without any page reload.
-    setInterval(function () {
-      if (!$("editor").open) refreshBoard().catch(function () {});
-    }, 2000);
-
     $("capture-btn").addEventListener("click", capture);
     $("capture-input").addEventListener("keydown", function (ev) { if (ev.key === "Enter") capture(); });
+    $("new-post-cancel").addEventListener("click", function () { $("new-post").close(); });
+    $("new-post-create").addEventListener("click", createPost);
+    $("new-post-title").addEventListener("keydown", function (ev) { if (ev.key === "Enter") { ev.preventDefault(); createPost(); } });
+    $("rename-cancel").addEventListener("click", function () { $("rename").close(); });
+    $("rename-confirm").addEventListener("click", confirmRename);
+    $("rename-input").addEventListener("input", updateRenameWarning);
+    $("rename-input").addEventListener("keydown", function (ev) { if (ev.key === "Enter") { ev.preventDefault(); confirmRename(); } });
+    $("discard-cancel").addEventListener("click", function () { $("confirm-discard").close(); });
+    $("discard-confirm").addEventListener("click", confirmDiscard);
     $("funnel-btn").addEventListener("click", toggleFunnel);
     $("commit-btn").addEventListener("click", function () { commit(false); });
     $("push-btn").addEventListener("click", function () { commit(true); });
@@ -691,6 +991,10 @@
     });
     $("editor-save").addEventListener("click", function () { saveAllEditorChanges().catch(function () {}); });
     $("editor-check").addEventListener("click", preflightCheck);
+    $("editor-dev").addEventListener("click", openInDevServer);
+    $("dev-cancel").addEventListener("click", function () { $("dev-server").close(); });
+    $("dev-copy").addEventListener("click", copyDevURL);
+    $("dev-open").addEventListener("click", openDevAnyway);
     // The check panel dismisses on any click outside itself (or on its own
     // anchor button, which toggles it).
     document.addEventListener("click", function (ev) {
@@ -704,7 +1008,13 @@
       wrap.hidden = !wrap.hidden;
     });
     $("raw-save").addEventListener("click", function () { saveRaw().catch(function () {}); });
-    $("source").addEventListener("input", function () { updatePreview(); });
+    // Preview renders at most once per typing pause: a burst of keystrokes
+    // collapses into a single re-render instead of one per keystroke.
+    var previewTimer = null;
+    $("source").addEventListener("input", function () {
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(updatePreview, 200);
+    });
     $("source").addEventListener("paste", pasteImage);
     $("source").addEventListener("keydown", function (ev) {
       if ((ev.metaKey || ev.ctrlKey) && ev.key === "s") { ev.preventDefault(); saveAllEditorChanges().catch(function () {}); }

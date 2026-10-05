@@ -31,3 +31,16 @@ test("external image references are identified without permitting implicit fetch
   assert.equal(EditorState.isExternalImage("//example.test/a.png"), true);
   assert.equal(EditorState.isExternalImage("./local.png"), false);
 });
+
+test("blocked image reasons cover external refs and loose posts without fetching", () => {
+  assert.equal(
+    EditorState.blockedImageReason("https://example.test/a.png", false),
+    "External image not loaded: https://example.test/a.png"
+  );
+  assert.equal(
+    EditorState.blockedImageReason("./cover.png", true),
+    "Image not loaded: loose posts hold no assets of their own: ./cover.png"
+  );
+  // A folder post's local reference is the one case the preview fetches.
+  assert.equal(EditorState.blockedImageReason("./cover.png", false), null);
+});

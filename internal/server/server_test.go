@@ -1,7 +1,9 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +23,7 @@ import (
 	"github.com/astrogui/astrogui/internal/lifecycle"
 	"github.com/astrogui/astrogui/internal/project"
 	"github.com/astrogui/astrogui/internal/safe"
+	"github.com/astrogui/astrogui/internal/watch"
 )
 
 // fixture builds a project fixture with a live server over it.
@@ -49,7 +52,8 @@ func newFixture(t *testing.T) *fixture {
 			t.Fatal(err)
 		}
 	}
-	guard, err := safe.New(ideas, wip, content)
+	trash := filepath.Join(base, "drafts", "trash")
+	guard, err := safe.New(ideas, wip, content, trash)
 	if err != nil {
 		t.Fatalf("guard: %v", err)
 	}
@@ -66,7 +70,7 @@ func newFixture(t *testing.T) *fixture {
 		Version:    "test",
 		Guard:      guard,
 		Cache:      derived,
-		Manager:    lifecycle.New(ideas, wip, content, guard, derived, base),
+		Manager:    lifecycle.New(ideas, wip, content, trash, guard, derived, base),
 	}
 	f.srv, err = New(f.app, UI())
 	if err != nil {
@@ -697,4 +701,484 @@ func statMod(t *testing.T, path string) time.Time {
 		t.Fatal(err)
 	}
 	return info.ModTime()
+}
+
+// TestModTimeOrNullSurvivesMissingFile is the regression for the post-save
+// stat: a file removed or made unreadable the instant after a successful
+// write must yield a null time, never a nil-dereference panic.
+func TestModTimeOrNullSurvivesMissingFile(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("modTimeOrNull panicked: %v", r)
+		}
+	}()
+	if got := modTimeOrNull(filepath.Join(t.TempDir(), "gone.md")); got != nil {
+		t.Errorf("missing file modTime = %v, want nil", got)
+	}
+	live := filepath.Join(t.TempDir(), "live.md")
+	if err := os.WriteFile(live, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if modTimeOrNull(live) == nil {
+		t.Error("existing file modTime = nil, want the modification time")
+	}
+}
+
+// TestEntryLookupErrorsAreHonest verifies a post that does not exist is 404
+// while a post that exists but cannot be read is a 500 naming the read
+// failure — an internal error is never disguised as absence.
+func TestEntryLookupErrorsAreHonest(t *testing.T) {
+	f := newFixture(t)
+
+	// Absent post: not found.
+	res, body := f.do("GET", "/api/collections/blog/entries/no-such-post", nil)
+	if res.StatusCode != 404 {
+		t.Fatalf("absent post = %d %v, want 404", res.StatusCode, body)
+	}
+
+	if runtime.GOOS == "windows" {
+		t.Skip("permission-based unreadability is not available on windows")
+	}
+	// Existing post whose file cannot be read: server error naming the read.
+	name := f.createIdea("unreadable idea")
+	index := filepath.Join(f.base, "drafts", "ideas", name, "index.md")
+	if err := os.Chmod(index, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(index, 0o644) })
+	res, body = f.do("GET", "/api/collections/blog/entries/"+name, nil)
+	if res.StatusCode != 500 {
+		t.Fatalf("unreadable post = %d %v, want 500", res.StatusCode, body)
+	}
+	if errText := fmt.Sprint(body["error"]); !strings.Contains(errText, "reading") {
+		t.Errorf("500 does not name the read failure: %v", errText)
+	}
+}
+
+// TestLoosePostExposesNoAssetNamespace verifies a loose file — a bare
+// markdown file with no directory of its own — cannot serve files from the
+// collection directory through its asset path, mirroring the upload refusal.
+func TestLoosePostExposesNoAssetNamespace(t *testing.T) {
+	f := newFixture(t)
+	content := filepath.Join(f.base, "src", "content", "blog")
+	if err := os.WriteFile(filepath.Join(content, "loose.md"), []byte("---\ntitle: Loose\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A real file in the collection directory, outside any post's folder.
+	if err := os.WriteFile(filepath.Join(content, "neighbor.png"), []byte("PNGDATA"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, body := f.do("GET", "/api/collections/blog/entries/loose/assets/neighbor.png", nil)
+	if res.StatusCode != 404 {
+		t.Fatalf("loose-post asset request = %d %v, want 404", res.StatusCode, body)
+	}
+}
+
+// TestAssetResponsesAreInert verifies an asset served as a top-level
+// document cannot execute in the tool's origin: sandbox policy and no type
+// sniffing on every asset response.
+func TestAssetResponsesAreInert(t *testing.T) {
+	f := newFixture(t)
+	name := f.createIdea("an idea with a diagram")
+	postDir := filepath.Join(f.base, "drafts", "ideas", name)
+	svg := `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`
+	if err := os.WriteFile(filepath.Join(postDir, "diagram.svg"), []byte(svg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, body := f.do("GET", "/api/collections/blog/entries/"+name+"/assets/diagram.svg", nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("svg asset = %d %v, want 200", res.StatusCode, body)
+	}
+	if got := res.Header.Get("Content-Security-Policy"); got != "default-src 'none'" {
+		t.Errorf("Content-Security-Policy = %q, want default-src 'none'", got)
+	}
+	if got := res.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q, want nosniff", got)
+	}
+	if got := res.Header.Get("Content-Type"); got != "image/svg+xml" {
+		t.Errorf("Content-Type = %q, want image/svg+xml", got)
+	}
+}
+
+// TestUnicodeTitlePinsSlugEndToEnd verifies a post created from a non-ASCII
+// title gets a folder name carrying the title's letters and a slug pinned to
+// that name, so the published URL depends only on the post's identity.
+func TestUnicodeTitlePinsSlugEndToEnd(t *testing.T) {
+	f := newFixture(t)
+	res, body := f.do("POST", "/api/collections/blog/entries", map[string]any{"title": "こんにちは世界"})
+	if res.StatusCode != 201 {
+		t.Fatalf("create = %d %v, want 201", res.StatusCode, body)
+	}
+	name, _ := body["name"].(string)
+	if name != "こんにちは世界" {
+		t.Fatalf("folder name = %q, want the title's letters", name)
+	}
+	index := filepath.Join(f.base, "drafts", "ideas", name, "index.md")
+	data, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "slug: "+name) {
+		t.Errorf("frontmatter does not pin slug to %q:\n%s", name, data)
+	}
+}
+
+// newWatchedFixture wires a real filesystem watcher into the fixture's app
+// so the change feed has a source.
+func newWatchedFixture(t *testing.T) *fixture {
+	t.Helper()
+	f := newFixture(t)
+	w, err := watch.New(filepath.Join(f.base, "drafts", "ideas"), filepath.Join(f.base, "drafts", "wip"), f.app.Collection.Dir)
+	if err != nil {
+		t.Fatalf("watch: %v", err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+	f.app.Events = w.Events()
+	f.srv.startFeed()
+	return f
+}
+
+// openFeed opens the change feed carrying the token in the query string,
+// the way EventSource must.
+func (f *fixture) openFeed(ctx context.Context) *http.Response {
+	f.t.Helper()
+	req, err := http.NewRequestWithContext(ctx, "GET",
+		f.baseURL+"/api/collections/blog/events?token="+f.srv.Token(), nil)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	res, err := f.ts.Client().Do(req)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return res
+}
+
+// feedLines streams a feed response body into a channel of lines.
+type feedLines struct {
+	lines chan string
+	res   *http.Response
+}
+
+func (f *fixture) readFeed(res *http.Response) *feedLines {
+	fl := &feedLines{lines: make(chan string, 64), res: res}
+	go func() {
+		sc := bufio.NewScanner(res.Body)
+		for sc.Scan() {
+			fl.lines <- sc.Text()
+		}
+		close(fl.lines)
+	}()
+	return fl
+}
+
+func (fl *feedLines) await(t *testing.T, needle string, timeout time.Duration) bool {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case line, ok := <-fl.lines:
+			if !ok {
+				return false
+			}
+			if strings.Contains(line, needle) {
+				return true
+			}
+		case <-deadline:
+			return false
+		}
+	}
+}
+
+// TestChangeFeedGuards verifies the feed obeys the same controls as every
+// API request — token (header or, for EventSource, query) and Host — and
+// that a valid request opens the stream.
+func TestChangeFeedGuards(t *testing.T) {
+	f := newWatchedFixture(t)
+
+	get := func(url string, host string) *http.Response {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if host != "" {
+			req.Host = host
+		}
+		res, err := f.ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		return res
+	}
+
+	if res := get(f.baseURL+"/api/collections/blog/events", ""); res.StatusCode != 401 {
+		t.Errorf("no token = %d, want 401", res.StatusCode)
+	}
+	if res := get(f.baseURL+"/api/collections/blog/events?token=wrong", ""); res.StatusCode != 401 {
+		t.Errorf("wrong query token = %d, want 401", res.StatusCode)
+	}
+	if res := get(f.baseURL+"/api/collections/blog/events?token="+f.srv.Token(), "rebind.example:9999"); res.StatusCode != 403 {
+		t.Errorf("foreign Host = %d, want 403", res.StatusCode)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	res := f.openFeed(ctx)
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("valid query token = %d, want 200", res.StatusCode)
+	}
+	if ct := res.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", ct)
+	}
+	if !f.readFeed(res).await(t, "event: ready", 2*time.Second) {
+		t.Error("stream never announced readiness")
+	}
+}
+
+// TestChangeFeedUnavailableWithoutWatcher verifies the feed is refused, not
+// silently empty, when watching could not be established — the client's cue
+// to fall back to periodic refresh.
+func TestChangeFeedUnavailableWithoutWatcher(t *testing.T) {
+	f := newFixture(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", f.baseURL+"/api/collections/blog/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-AstroGUI-Token", f.srv.Token())
+	res, err := f.ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("feed without watcher = %d, want 503", res.StatusCode)
+	}
+}
+
+// TestChangeFeedDeliversTicksAndSurvivesDisconnects verifies a change under
+// a watched directory reaches connected clients, and that a client dropping
+// off never blocks the others.
+func TestChangeFeedDeliversTicksAndSurvivesDisconnects(t *testing.T) {
+	f := newWatchedFixture(t)
+	ideas := filepath.Join(f.base, "drafts", "ideas")
+	postFile := filepath.Join(ideas, "tick-post", "index.md")
+	if err := os.MkdirAll(filepath.Dir(postFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	ctxA, cancelA := context.WithCancel(context.Background())
+	resA := f.openFeed(ctxA)
+	a := f.readFeed(resA)
+	if !a.await(t, "event: ready", 2*time.Second) {
+		t.Fatal("client A never saw ready")
+	}
+	ctxB, cancelB := context.WithCancel(context.Background())
+	defer cancelB()
+	resB := f.openFeed(ctxB)
+	b := f.readFeed(resB)
+	if !b.await(t, "event: ready", 2*time.Second) {
+		t.Fatal("client B never saw ready")
+	}
+
+	if err := os.WriteFile(postFile, []byte("---\ntitle: Tick\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !a.await(t, "event: changed", 5*time.Second) {
+		t.Error("client A never heard about the change")
+	}
+	if !b.await(t, "event: changed", 5*time.Second) {
+		t.Error("client B never heard about the change")
+	}
+
+	// Client A drops off mid-stream.
+	cancelA()
+	resA.Body.Close()
+
+	// Another change: client B still hears about it.
+	if err := os.WriteFile(postFile, []byte("---\ntitle: Tick\n---\nbody grown"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !b.await(t, "event: changed", 5*time.Second) {
+		t.Error("a disconnected client blocked the feed for others")
+	}
+}
+
+// TestChangeFeedHeartbeat verifies the stream keeps itself alive with
+// comment pings so dead connections surface as write errors.
+func TestChangeFeedHeartbeat(t *testing.T) {
+	f := newWatchedFixture(t)
+	f.srv.heartbeat = 100 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	res := f.openFeed(ctx)
+	defer res.Body.Close()
+	if !f.readFeed(res).await(t, ": ping", 2*time.Second) {
+		t.Error("heartbeat never arrived")
+	}
+}
+
+// TestRenameAndDiscardRoutes verifies the management actions over the API:
+// rename succeeds and reports the derived name, a taken name is a 409, and
+// loose posts are refused 403 for both routes.
+func TestRenameAndDiscardRoutes(t *testing.T) {
+	f := newFixture(t)
+	name := f.createIdea("rename me please")
+
+	// Loose file for the refusal cases.
+	content := filepath.Join(f.base, "src", "content", "blog")
+	if err := os.WriteFile(filepath.Join(content, "loose.md"), []byte("---\ntitle: Loose\n---\nbody"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Rename succeeds and reports the slugified name.
+	res, body := f.do("POST", "/api/collections/blog/entries/"+name+"/rename", map[string]any{"name": "A Cleaner Name"})
+	if res.StatusCode != 200 {
+		t.Fatalf("rename = %d %v, want 200", res.StatusCode, body)
+	}
+	if body["name"] != "a-cleaner-name" {
+		t.Errorf("renamed name = %v, want a-cleaner-name", body["name"])
+	}
+	if _, err := os.Stat(filepath.Join(f.base, "drafts", "ideas", "a-cleaner-name", "index.md")); err != nil {
+		t.Fatalf("folder did not move: %v", err)
+	}
+
+	// Taken name: 409, both posts unchanged.
+	f.createIdea("occupy the name") // becomes occupy-the-name
+	res, body = f.do("POST", "/api/collections/blog/entries/a-cleaner-name/rename", map[string]any{"name": "occupy the name"})
+	if res.StatusCode != 409 {
+		t.Fatalf("taken name = %d %v, want 409", res.StatusCode, body)
+	}
+
+	// Loose posts are refused on both routes.
+	res, body = f.do("POST", "/api/collections/blog/entries/loose/rename", map[string]any{"name": "elsewhere"})
+	if res.StatusCode != 403 {
+		t.Fatalf("loose rename = %d %v, want 403", res.StatusCode, body)
+	}
+	res, body = f.do("POST", "/api/collections/blog/entries/loose/discard", nil)
+	if res.StatusCode != 403 {
+		t.Fatalf("loose discard = %d %v, want 403", res.StatusCode, body)
+	}
+
+	// Discard succeeds: the folder lands in the trash, not deletion.
+	res, body = f.do("POST", "/api/collections/blog/entries/a-cleaner-name/discard", nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("discard = %d %v, want 200", res.StatusCode, body)
+	}
+	if _, err := os.Stat(filepath.Join(f.base, "drafts", "trash", "a-cleaner-name", "index.md")); err != nil {
+		t.Fatalf("post not in trash: %v", err)
+	}
+	// And the board no longer lists it.
+	res, body = f.do("GET", "/api/collections/blog/board", nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("board: %d", res.StatusCode)
+	}
+	for _, card := range body["columns"].(map[string]any)["ideas"].([]any) {
+		if card.(map[string]any)["name"] == "a-cleaner-name" {
+			t.Error("discarded post still on the board")
+		}
+	}
+}
+
+// TestDevURLRoute verifies the dev-server bridge: URL shapes for default and
+// configured bases, honest reachability both ways, and the standard request
+// guards.
+func TestDevURLRoute(t *testing.T) {
+	f := newFixture(t)
+
+	// Default shape: Astro's conventional base plus the slug.
+	res, body := f.do("GET", "/api/collections/blog/dev-url?slug=my-post", nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("dev-url = %d %v, want 200", res.StatusCode, body)
+	}
+	if body["url"] != "http://localhost:4321/my-post/" {
+		t.Errorf("default url = %v", body["url"])
+	}
+	if _, ok := body["reachable"].(bool); !ok {
+		t.Errorf("reachable = %v, want a boolean", body["reachable"])
+	}
+
+	// A configured base with a subpath and trailing slash joins cleanly.
+	f.app.DevURL = "http://localhost:4321/posts/"
+	res, body = f.do("GET", "/api/collections/blog/dev-url?slug=my-post", nil)
+	if res.StatusCode != 200 || body["url"] != "http://localhost:4321/posts/my-post/" {
+		t.Fatalf("subpath url = %d %v", res.StatusCode, body)
+	}
+
+	// Nothing listening: reachable is honestly false (port 1 refuses fast).
+	f.app.DevURL = "http://127.0.0.1:1"
+	res, body = f.do("GET", "/api/collections/blog/dev-url?slug=x", nil)
+	if res.StatusCode != 200 {
+		t.Fatalf("probe-false response = %d", res.StatusCode)
+	}
+	if body["reachable"] != false {
+		t.Errorf("reachable = %v, want false", body["reachable"])
+	}
+
+	// Something listening: reachable is true.
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound) // any answer means running
+	}))
+	defer up.Close()
+	f.app.DevURL = up.URL
+	res, body = f.do("GET", "/api/collections/blog/dev-url?slug=x", nil)
+	if res.StatusCode != 200 || body["reachable"] != true {
+		t.Fatalf("reachable-true = %d %v", res.StatusCode, body)
+	}
+
+	// The route obeys the standard guards: token and Host.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", f.baseURL+"/api/collections/blog/dev-url?slug=x", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err = f.ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 401 {
+		t.Errorf("no token = %d, want 401", res.StatusCode)
+	}
+	req, err = http.NewRequestWithContext(ctx, "GET", f.baseURL+"/api/collections/blog/dev-url?slug=x", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = "rebind.example:9999"
+	res, err = f.ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 403 {
+		t.Errorf("foreign Host = %d, want 403", res.StatusCode)
+	}
+
+	// A missing slug is a named client error.
+	res, body = f.do("GET", "/api/collections/blog/dev-url", nil)
+	if res.StatusCode != 400 {
+		t.Fatalf("missing slug = %d %v, want 400", res.StatusCode, body)
+	}
+}
+
+// TestEntryNamesCannotTraverse is the API-level path-injection regression:
+// %2F-decoded traversal in the {post} segment must be refused, not resolved
+// against the filesystem outside the managed directories. (A bare "." never
+// reaches a post handler: the mux's path cleaning maps it to the entry-list
+// route, which is harmless.)
+func TestEntryNamesCannotTraverse(t *testing.T) {
+	f := newFixture(t)
+	for _, name := range []string{"..%2F..%2F..%2Fgo.mod", "a%2Fb", "sub%5Cdir"} {
+		res, body := f.do("GET", "/api/collections/blog/entries/"+name, nil)
+		if res.StatusCode < 400 {
+			t.Errorf("traversal name %s served: %d %v", name, res.StatusCode, body)
+		}
+	}
 }

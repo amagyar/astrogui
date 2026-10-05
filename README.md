@@ -68,13 +68,14 @@ directory using the `glob()` loader.
 
 ## The on-disk convention
 
-The board is three directories. Every post is a **folder** holding `index.md`
-plus the post's own images:
+The board is three directories. Every post is a **folder** holding its entry
+file (`index.md`, or `index.mdx` for MDX posts) plus the post's own images:
 
 ```
 drafts/ideas/my-post/index.md      captured, not yet written
 drafts/wip/my-post/index.md        in progress
 src/content/blog/my-post/index.md  published — inside your collection
+drafts/trash/my-post/index.md      discarded — restore by moving it back
 ```
 
 - **Lifecycle state is the directory.** Moving a card is a single atomic
@@ -92,10 +93,17 @@ src/content/blog/my-post/index.md  published — inside your collection
 - **Posts you did not create are never restructured.** Loose `.md` files in
   the content directory are listed read-only (dragging and structured edits
   are disabled; the raw text view still works) and are never migrated to the
-  folder layout.
+  folder layout. They are never renamed or discarded either.
+- **Managing a post's identity is explicit.** The board's card actions rename
+  a folder post in place — one atomic directory rename, with the pinned
+  `slug` following the new name so the identity stays consistent — and
+  discard a post by moving its folder into `drafts/trash`: nothing is
+  deleted, and restoring is moving the folder back with any tool. Renaming a
+  published post warns first, because its public URL changes. Draft columns
+  also carry a **+** control for creating a titled post directly.
 
-Directory names default to `drafts/ideas` and `drafts/wip` and are
-configurable, as is the content directory override and the staleness
+Directory names default to `drafts/ideas`, `drafts/wip`, and `drafts/trash`
+and are configurable, as is the content directory override and the staleness
 threshold, in the tool's own config at
 `~/.config/astrogui/config.json` (or your platform's equivalent). The tool's
 derived cache (`cache.json`, first-seen timestamps and the funnel's recorded
@@ -165,7 +173,13 @@ is a **reading copy** rendered in the browser. The reading copy conveys
 content, not appearance: expect your post's structure (headings, tables, code
 fences and their metadata, footnotes, images), and do not expect the
 published site's styling, Shiki highlighting, or optimized images — the
-blog's own dev server is the fidelity tool. Nothing you type is normalized:
+blog's own dev server is the fidelity tool. The editor's **Dev server** button
+bridges to it: it opens the post at its real URL — the configured dev-server
+base (`devUrl` in the tool's config, defaulting to Astro's
+`http://localhost:4321`) joined with the post's slug — in a new tab. When the
+dev server is not running, astrogui says so, names the URL it tried, and
+offers to open or copy it anyway; it never starts or manages the dev server
+itself — running it stays your own command. Nothing you type is normalized:
 saving stores your bytes exactly, and an unchanged file is never rewritten.
 External image URLs are shown as blocked placeholders in the local preview;
 astrogui does not fetch them while rendering a post. If you leave an editor

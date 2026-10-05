@@ -246,9 +246,11 @@ func hasMarkdown(dir string) bool {
 		if !e.IsDir() && isMarkdown(e.Name()) {
 			return true
 		}
-		// Folder posts: <dir>/<post>/index.md
+		// Folder posts: <dir>/<post>/index.md or index.mdx
 		if e.IsDir() {
-			if fileExists(filepath.Join(dir, e.Name(), "index.md")) {
+			postDir := filepath.Join(dir, e.Name())
+			if fileExists(filepath.Join(postDir, "index.md")) ||
+				fileExists(filepath.Join(postDir, "index.mdx")) {
 				return true
 			}
 		}
